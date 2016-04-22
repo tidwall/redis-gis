@@ -97,7 +97,7 @@ struct wktGeometry{
         wktMultiLineString multiLineString;
         wktMultiPolygon multiPolygon;
         wktGeometryCollection geometryCollection;
-    };
+    } v;
 };
 
 // wktParse parses the input and fills the wkt object. wktFree must be called

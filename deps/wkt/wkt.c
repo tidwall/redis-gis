@@ -115,8 +115,8 @@ static stdResult wktParsePoint(char *p, wktGeometry **wkt){
             err = WKT_ERRMEM;
             goto err;
         }
-        nwkt->point.x = pair.x;
-        nwkt->point.y = pair.y;
+        nwkt->v.point.x = pair.x;
+        nwkt->v.point.y = pair.y;
         *wkt = nwkt;
     }
     res.err = err;
@@ -192,11 +192,11 @@ static stdResult wktParseLineStringOrMultiPoint(wktType type, char *p, wktGeomet
             goto err;
         }
         if (type == WKT_LINESTRING){
-            nwkt->lineString.points = points;
-            nwkt->lineString.size = size;
+            nwkt->v.lineString.points = points;
+            nwkt->v.lineString.size = size;
         } else{
-            nwkt->multiPoint.points = points;
-            nwkt->multiPoint.size = size;
+            nwkt->v.multiPoint.points = points;
+            nwkt->v.multiPoint.size = size;
         }
         *wkt = nwkt;
     }
@@ -259,8 +259,8 @@ static stdResult wktParseMultiLineStringOrPolygon(wktType type, char *p, wktGeom
                     }
                     lineStrings = nlineStrings;
                 }
-                lineStrings[size].points = nwkt->lineString.points;
-                lineStrings[size].size = nwkt->lineString.size;
+                lineStrings[size].points = nwkt->v.lineString.points;
+                lineStrings[size].size = nwkt->v.lineString.size;
                 size++;
                 free(nwkt); // only free the container, we are borrowing the contents.
                 nwkt = NULL;
@@ -285,11 +285,11 @@ static stdResult wktParseMultiLineStringOrPolygon(wktType type, char *p, wktGeom
             goto err;
         }
         if (type == WKT_MULTILINESTRING){
-            nwkt->multiLineString.lineStrings = lineStrings;
-            nwkt->multiLineString.size = size;
+            nwkt->v.multiLineString.lineStrings = lineStrings;
+            nwkt->v.multiLineString.size = size;
         } else{
-            nwkt->polygon.lineStrings = lineStrings;
-            nwkt->polygon.size = size;
+            nwkt->v.polygon.lineStrings = lineStrings;
+            nwkt->v.polygon.size = size;
         }
         *wkt = nwkt;
     }
@@ -352,8 +352,8 @@ static stdResult wktParseMultiPolygon(char *p, wktGeometry **wkt){
                     }
                     polygons = npolygons;
                 }
-                polygons[size].lineStrings = nwkt->polygon.lineStrings;
-                polygons[size].size = nwkt->polygon.size;
+                polygons[size].lineStrings = nwkt->v.polygon.lineStrings;
+                polygons[size].size = nwkt->v.polygon.size;
                 size++;
                 free(nwkt); // only free the container, we are borrowing the contents.
                 nwkt = NULL;
@@ -377,8 +377,8 @@ static stdResult wktParseMultiPolygon(char *p, wktGeometry **wkt){
             err = WKT_ERRMEM;
             goto err;
         }
-        nwkt->multiPolygon.polygons = polygons;
-        nwkt->multiPolygon.size = size;
+        nwkt->v.multiPolygon.polygons = polygons;
+        nwkt->v.multiPolygon.size = size;
         *wkt = nwkt;
     }
     res.err = err;
@@ -463,8 +463,8 @@ static stdResult wktParseGeometryCollection(char *p, wktGeometry **wkt){
             err = WKT_ERRMEM;
             goto err;
         }
-        nwkt->geometryCollection.geometries = geometries;
-        nwkt->geometryCollection.size = size;
+        nwkt->v.geometryCollection.geometries = geometries;
+        nwkt->v.geometryCollection.size = size;
         *wkt = nwkt;
     }
     res.err = err;
@@ -573,19 +573,19 @@ void wktFree(wktGeometry *wkt) {
     default:
         break;
     case WKT_POINT:
-        wktFreePoint(&wkt->point);
+        wktFreePoint(&wkt->v.point);
         break;
     case WKT_LINESTRING:
-        wktFreeLineString(&wkt->lineString);
+        wktFreeLineString(&wkt->v.lineString);
         break;
     case WKT_MULTIPOINT:
-        wktFreeMultiPoint(&wkt->multiPoint);
+        wktFreeMultiPoint(&wkt->v.multiPoint);
         break;
     case WKT_POLYGON:
-        wktFreePolygon(&wkt->polygon);
+        wktFreePolygon(&wkt->v.polygon);
         break;
     case WKT_MULTILINESTRING:
-        wktFreeMultiLineString(&wkt->multiLineString);
+        wktFreeMultiLineString(&wkt->v.multiLineString);
         break;
     }
     memset(wkt, 0, sizeof(wktGeometry));
@@ -646,18 +646,18 @@ char *wktText(wktGeometry *wkt){
         return NULL;
     case WKT_POINT:
         APPEND("POINT(");
-        APPEND(dstr(wkt->point.x, output));
+        APPEND(dstr(wkt->v.point.x, output));
         APPEND(" ");
-        APPEND(dstr(wkt->point.y, output));
+        APPEND(dstr(wkt->v.point.y, output));
         APPEND(")");
         break;
     case WKT_LINESTRING:
         APPEND("LINESTRING(");
-        for (int i=0;i<wkt->lineString.size;i++){
+        for (int i=0;i<wkt->v.lineString.size;i++){
             if (i!=0){
                 APPEND(",");    
             }
-            wktPoint point = wkt->lineString.points[i];
+            wktPoint point = wkt->v.lineString.points[i];
             APPEND(dstr(point.x, output));
             APPEND(" ");
             APPEND(dstr(point.y, output));
@@ -666,11 +666,11 @@ char *wktText(wktGeometry *wkt){
         break;
     case WKT_POLYGON:
         APPEND("POLYGON(");
-        for (int i=0;i<wkt->polygon.size;i++){
+        for (int i=0;i<wkt->v.polygon.size;i++){
             if (i!=0){
                 APPEND(",");    
             }
-            wktLineString lineString = wkt->polygon.lineStrings[i];
+            wktLineString lineString = wkt->v.polygon.lineStrings[i];
             for (int i=0;i<lineString.size;i++){
                 if (i!=0){
                     APPEND(",");    
@@ -685,11 +685,11 @@ char *wktText(wktGeometry *wkt){
         break;
     case WKT_MULTIPOINT:
         APPEND("MULTIPOINT(");
-        for (int i=0;i<wkt->multiPoint.size;i++){
+        for (int i=0;i<wkt->v.multiPoint.size;i++){
             if (i!=0){
                 APPEND(",");    
             }
-            wktPoint point = wkt->multiPoint.points[i];
+            wktPoint point = wkt->v.multiPoint.points[i];
             APPEND(dstr(point.x, output));
             APPEND(" ");
             APPEND(dstr(point.y, output));
@@ -698,11 +698,11 @@ char *wktText(wktGeometry *wkt){
         break;
     case WKT_MULTILINESTRING:
         APPEND("MULTILINESTRING(");
-        for (int i=0;i<wkt->multiLineString.size;i++){
+        for (int i=0;i<wkt->v.multiLineString.size;i++){
             if (i!=0){
                 APPEND(",");
             }
-            wktLineString lineString = wkt->multiLineString.lineStrings[i];
+            wktLineString lineString = wkt->v.multiLineString.lineStrings[i];
             for (int i=0;i<lineString.size;i++){
                 if (i!=0){
                     APPEND(",");    
@@ -717,11 +717,11 @@ char *wktText(wktGeometry *wkt){
         break;
     case WKT_MULTIPOLYGON:
         APPEND("MULTIPOLYGON(");
-        for (int i=0;i<wkt->multiPolygon.size;i++){
+        for (int i=0;i<wkt->v.multiPolygon.size;i++){
             if (i!=0){
                 APPEND(",");    
             }
-            wktPolygon polygon = wkt->multiPolygon.polygons[i];
+            wktPolygon polygon = wkt->v.multiPolygon.polygons[i];
             for (int i=0;i<polygon.size;i++){
                 if (i!=0){
                     APPEND(",");    
@@ -741,11 +741,11 @@ char *wktText(wktGeometry *wkt){
         break;
     case WKT_GEOMETRYCOLLECTION:
         APPEND("GEOMETRYCOLLECTION(");
-        for (int i=0;i<wkt->geometryCollection.size;i++){
+        for (int i=0;i<wkt->v.geometryCollection.size;i++){
             if (i!=0){
                 APPEND(",");    
             }
-            wktGeometry *geometry = wkt->geometryCollection.geometries[i];
+            wktGeometry *geometry = wkt->v.geometryCollection.geometries[i];
             char *text = wktText(geometry);
             if (!text){
                 goto oom;
