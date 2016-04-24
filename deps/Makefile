@@ -37,6 +37,7 @@ distclean:
 	-(cd linenoise && $(MAKE) clean) > /dev/null || true
 	-(cd lua && $(MAKE) clean) > /dev/null || true
 	-(cd geohash-int && $(MAKE) clean) > /dev/null || true
+	-(cd tile38geo && $(MAKE) clean) > /dev/null || true
 	-(cd jemalloc && [ -f Makefile ] && $(MAKE) distclean) > /dev/null || true
 	-(rm -f .make-*)
 
@@ -88,3 +89,9 @@ geohash-int: .make-prerequisites
 	cd geohash-int && $(MAKE)
 
 .PHONY: geohash-int
+
+tile38geo: .make-prerequisites
+	@printf '%b %b\n' $(MAKECOLOR)MAKE$(ENDCOLOR) $(BINCOLOR)$@$(ENDCOLOR)
+	cd tile38geo && $(MAKE)
+
+.PHONY: tile38geo

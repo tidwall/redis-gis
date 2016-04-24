@@ -10,6 +10,9 @@ R_CC=$(CC) $(R_CFLAGS)
 R_LD=$(CC) $(R_LDFLAGS)
 
 all: wkt.o
+test: all
+	-@$(R_CC) -o test test.c wkt_test.c wkt.o -I.
+	-@./test
 
 .PHONY: all
 

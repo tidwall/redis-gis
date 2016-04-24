@@ -85,8 +85,8 @@ typedef struct {
 } wktGeometryCollection;
 
 
-// wktGeometry is a simple geometry type + 16 byte union. This should cover
-// all of the basic WKT types and keep the memory footprint decently low.
+/* wktGeometry is a simple geometry type + 16 byte union. This should cover
+ * all of the basic WKT types and keep the memory footprint decently low. */
 struct wktGeometry{
     wktType type;
     union {
@@ -100,19 +100,20 @@ struct wktGeometry{
     } v;
 };
 
-// wktParse parses the input and fills the wkt object. wktFree must be called
-// to release the wkt from memory.
+/* wktParse parses the input and fills the wkt object. wktFree must be called
+ * to release the wkt from memory. */
 wktErr wktParse(const char *input, wktGeometry **wkt);
 
-// wtkFree releases a wktGeometry object.
+/* wtkFree releases a wktGeometry object. */
 void wktFree(wktGeometry *wkt);
 
-// wktErrText returns a string representation of the error.
+/* wktErrText returns a string representation of the error. */
 const char *wktErrText(wktErr err);
 
-// wtkText returns a string represention of the geometry. The returned string
-// must be freed when it's no longer needed.
+/* wtkText returns a string represention of the geometry. The returned string
+ * must be freed when it's no longer needed. */
 char *wktText(wktGeometry *wkt);
+void wktFreeText(char *s);
 
 
 #if defined(__cplusplus)

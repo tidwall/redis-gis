@@ -767,6 +767,11 @@ oom:
     return NULL;
 }
 
+void wktFreeText(char *s){
+    if (s){
+        free(s);
+    }
+}
 
 const char *wktErrText(wktErr err){
     switch (err){
