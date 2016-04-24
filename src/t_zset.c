@@ -1308,6 +1308,7 @@ int zsetAdd(robj *zobj, double score, sds ele, int *flags, double *newscore) {
                 zsetConvert(zobj,OBJ_ENCODING_SKIPLIST);
             if (sdslen(ele) > server.zset_max_ziplist_value)
                 zsetConvert(zobj,OBJ_ENCODING_SKIPLIST);
+            if (newscore) *newscore = score;
             *flags |= ZADD_ADDED;
             return 1;
         } else {
@@ -1359,6 +1360,7 @@ int zsetAdd(robj *zobj, double score, sds ele, int *flags, double *newscore) {
             znode = zslInsert(zs->zsl,score,ele);
             serverAssert(dictAdd(zs->dict,ele,&znode->score) == DICT_OK);
             *flags |= ZADD_ADDED;
+            if (newscore) *newscore = score;
             return 1;
         } else {
             *flags |= ZADD_NOP;
@@ -1368,6 +1370,113 @@ int zsetAdd(robj *zobj, double score, sds ele, int *flags, double *newscore) {
         serverPanic("Unknown sorted set encoding");
     }
     return 0; /* Never reached. */
+}
+
+/* Delete the element 'ele' from the sorted set, returning 1 if the element
+ * existed and was deleted, 0 otherwise (the element was not there). */
+int zsetDel(robj *zobj, sds ele) {
+    if (zobj->encoding == OBJ_ENCODING_ZIPLIST) {
+        unsigned char *eptr;
+
+        if ((eptr = zzlFind(zobj->ptr,ele,NULL)) != NULL) {
+            zobj->ptr = zzlDelete(zobj->ptr,eptr);
+            return 1;
+        }
+    } else if (zobj->encoding == OBJ_ENCODING_SKIPLIST) {
+        zset *zs = zobj->ptr;
+        dictEntry *de;
+        double score;
+
+        de = dictFind(zs->dict,ele);
+        if (de != NULL) {
+            /* Get the score in order to delete from the skiplist later. */
+            score = *(double*)dictGetVal(de);
+
+            /* Delete from the hash table and later from the skiplist.
+             * Note that the order is important: deleting from the skiplist
+             * actually releases the SDS string representing the element,
+             * which is shared between the skiplist and the hash table, so
+             * we need to delete from the skiplist as the final step. */
+            int retval1 = dictDelete(zs->dict,ele);
+
+            /* Delete from skiplist. */
+            int retval2 = zslDelete(zs->zsl,score,ele,NULL);
+
+            serverAssert(retval1 == DICT_OK && retval2);
+
+            if (htNeedsResize(zs->dict)) dictResize(zs->dict);
+            return 1;
+        }
+    } else {
+        serverPanic("Unknown sorted set encoding");
+    }
+    return 0; /* No such element found. */
+}
+
+/* Given a sorted set object returns the 0-based rank of the object or
+ * -1 if the object does not exist.
+ *
+ * For rank we mean the position of the element in the sorted collection
+ * of elements. So the first element has rank 0, the second rank 1, and so
+ * forth up to length-1 elements.
+ *
+ * If 'reverse' is false, the rank is returned considering as first element
+ * the one with the lowest score. Otherwise if 'reverse' is non-zero
+ * the rank is computed considering as element with rank 0 the one with
+ * the highest score. */
+long zsetRank(robj *zobj, sds ele, int reverse) {
+    unsigned long llen;
+    unsigned long rank;
+
+    llen = zsetLength(zobj);
+
+    if (zobj->encoding == OBJ_ENCODING_ZIPLIST) {
+        unsigned char *zl = zobj->ptr;
+        unsigned char *eptr, *sptr;
+
+        eptr = ziplistIndex(zl,0);
+        serverAssert(eptr != NULL);
+        sptr = ziplistNext(zl,eptr);
+        serverAssert(sptr != NULL);
+
+        rank = 1;
+        while(eptr != NULL) {
+            if (ziplistCompare(eptr,(unsigned char*)ele,sdslen(ele)))
+                break;
+            rank++;
+            zzlNext(zl,&eptr,&sptr);
+        }
+
+        if (eptr != NULL) {
+            if (reverse)
+                return llen-rank;
+            else
+                return rank-1;
+        } else {
+            return -1;
+        }
+    } else if (zobj->encoding == OBJ_ENCODING_SKIPLIST) {
+        zset *zs = zobj->ptr;
+        zskiplist *zsl = zs->zsl;
+        dictEntry *de;
+        double score;
+
+        de = dictFind(zs->dict,ele);
+        if (de != NULL) {
+            score = *(double*)dictGetVal(de);
+            rank = zslGetRank(zsl,score,ele);
+            /* Existing elements always have a rank. */
+            serverAssert(rank != 0);
+            if (reverse)
+                return llen-rank;
+            else
+                return rank-1;
+        } else {
+            return -1;
+        }
+    } else {
+        serverPanic("Unknown sorted set encoding");
+    }
 }
 
 /*-----------------------------------------------------------------------------
@@ -1513,56 +1622,13 @@ void zremCommand(client *c) {
     if ((zobj = lookupKeyWriteOrReply(c,key,shared.czero)) == NULL ||
         checkType(c,zobj,OBJ_ZSET)) return;
 
-    if (zobj->encoding == OBJ_ENCODING_ZIPLIST) {
-        unsigned char *eptr;
-
-        for (j = 2; j < c->argc; j++) {
-            if ((eptr = zzlFind(zobj->ptr,c->argv[j]->ptr,NULL)) != NULL) {
-                deleted++;
-                zobj->ptr = zzlDelete(zobj->ptr,eptr);
-                if (zzlLength(zobj->ptr) == 0) {
-                    dbDelete(c->db,key);
-                    keyremoved = 1;
-                    break;
-                }
-            }
+    for (j = 2; j < c->argc; j++) {
+        if (zsetDel(zobj,c->argv[j]->ptr)) deleted++;
+        if (zsetLength(zobj) == 0) {
+            dbDelete(c->db,key);
+            keyremoved = 1;
+            break;
         }
-    } else if (zobj->encoding == OBJ_ENCODING_SKIPLIST) {
-        zset *zs = zobj->ptr;
-        dictEntry *de;
-        double score;
-
-        for (j = 2; j < c->argc; j++) {
-            de = dictFind(zs->dict,c->argv[j]->ptr);
-            if (de != NULL) {
-                deleted++;
-
-                /* Get the score in order to delete from the skiplist later. */
-                score = *(double*)dictGetVal(de);
-
-                /* Delete from the hash table and later from the skiplist.
-                 * Note that the order is important: deleting from the skiplist
-                 * actually releases the SDS string representing the element,
-                 * which is shared between the skiplist and the hash table, so
-                 * we need to delete from the skiplist as the final step. */
-                int retval1 = dictDelete(zs->dict,c->argv[j]->ptr);
-
-                /* Delete from skiplist. */
-                int retval2 = zslDelete(zs->zsl,score,c->argv[j]->ptr,NULL);
-
-                serverAssertWithInfo(c,c->argv[j],
-                    retval1 == DICT_OK && retval2);
-
-                if (htNeedsResize(zs->dict)) dictResize(zs->dict);
-                if (dictSize(zs->dict) == 0) {
-                    dbDelete(c->db,key);
-                    keyremoved = 1;
-                    break;
-                }
-            }
-        }
-    } else {
-        serverPanic("Unknown sorted set encoding");
     }
 
     if (deleted) {
@@ -2972,62 +3038,17 @@ void zrankGenericCommand(client *c, int reverse) {
     robj *key = c->argv[1];
     robj *ele = c->argv[2];
     robj *zobj;
-    unsigned long llen;
-    unsigned long rank;
+    long rank;
 
     if ((zobj = lookupKeyReadOrReply(c,key,shared.nullbulk)) == NULL ||
         checkType(c,zobj,OBJ_ZSET)) return;
-    llen = zsetLength(zobj);
 
     serverAssertWithInfo(c,ele,sdsEncodedObject(ele));
-
-    if (zobj->encoding == OBJ_ENCODING_ZIPLIST) {
-        unsigned char *zl = zobj->ptr;
-        unsigned char *eptr, *sptr;
-
-        eptr = ziplistIndex(zl,0);
-        serverAssertWithInfo(c,zobj,eptr != NULL);
-        sptr = ziplistNext(zl,eptr);
-        serverAssertWithInfo(c,zobj,sptr != NULL);
-
-        rank = 1;
-        while(eptr != NULL) {
-            if (ziplistCompare(eptr,ele->ptr,sdslen(ele->ptr)))
-                break;
-            rank++;
-            zzlNext(zl,&eptr,&sptr);
-        }
-
-        if (eptr != NULL) {
-            if (reverse)
-                addReplyLongLong(c,llen-rank);
-            else
-                addReplyLongLong(c,rank-1);
-        } else {
-            addReply(c,shared.nullbulk);
-        }
-    } else if (zobj->encoding == OBJ_ENCODING_SKIPLIST) {
-        zset *zs = zobj->ptr;
-        zskiplist *zsl = zs->zsl;
-        dictEntry *de;
-        double score;
-
-        ele = c->argv[2];
-        de = dictFind(zs->dict,ele->ptr);
-        if (de != NULL) {
-            score = *(double*)dictGetVal(de);
-            rank = zslGetRank(zsl,score,ele->ptr);
-            /* Existing elements always have a rank. */
-            serverAssertWithInfo(c,ele,rank);
-            if (reverse)
-                addReplyLongLong(c,llen-rank);
-            else
-                addReplyLongLong(c,rank-1);
-        } else {
-            addReply(c,shared.nullbulk);
-        }
+    rank = zsetRank(zobj,ele->ptr,reverse);
+    if (rank >= 0) {
+        addReplyLongLong(c,rank);
     } else {
-        serverPanic("Unknown sorted set encoding");
+        addReply(c,shared.nullbulk);
     }
 }
 
