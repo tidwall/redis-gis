@@ -221,6 +221,12 @@ robj *createZsetZiplistObject(void) {
     return o;
 }
 
+robj *createSpatialObject(void) {
+    spatial *s = spatialNew();
+    robj *o = createObject(OBJ_SPATIAL, s);
+    return o;
+}
+
 void freeStringObject(robj *o) {
     if (o->encoding == OBJ_ENCODING_RAW) {
         sdsfree(o->ptr);
@@ -281,6 +287,10 @@ void freeHashObject(robj *o) {
     }
 }
 
+void freeSpatialObject(robj *o) {
+    spatialFree(o->ptr);
+}
+
 void incrRefCount(robj *o) {
     if (o->refcount != OBJ_SHARED_REFCOUNT) o->refcount++;
 }
@@ -293,6 +303,7 @@ void decrRefCount(robj *o) {
         case OBJ_SET: freeSetObject(o); break;
         case OBJ_ZSET: freeZsetObject(o); break;
         case OBJ_HASH: freeHashObject(o); break;
+        case OBJ_SPATIAL: freeSpatialObject(o); break;
         default: serverPanic("Unknown object type"); break;
         }
         zfree(o);

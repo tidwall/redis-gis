@@ -63,6 +63,7 @@ typedef long long mstime_t; /* millisecond time type. */
 #include "latency.h" /* Latency monitor API */
 #include "sparkline.h" /* ASCII graphs API */
 #include "quicklist.h"
+#include "spatial.h" /* Spatial type */
 
 /* Following includes allow test functions to be called from Redis main() */
 #include "zipmap.h"
@@ -417,7 +418,8 @@ typedef long long mstime_t; /* millisecond time type. */
 #define NOTIFY_ZSET (1<<7)        /* z */
 #define NOTIFY_EXPIRED (1<<8)     /* x */
 #define NOTIFY_EVICTED (1<<9)     /* e */
-#define NOTIFY_ALL (NOTIFY_GENERIC | NOTIFY_STRING | NOTIFY_LIST | NOTIFY_SET | NOTIFY_HASH | NOTIFY_ZSET | NOTIFY_EXPIRED | NOTIFY_EVICTED)      /* A */
+#define NOTIFY_SPATIAL (1<<10)    /* s */
+#define NOTIFY_ALL (NOTIFY_GENERIC | NOTIFY_STRING | NOTIFY_LIST | NOTIFY_SET | NOTIFY_HASH | NOTIFY_ZSET | NOTIFY_EXPIRED | NOTIFY_EVICTED | NOTIFY_SPATIAL)      /* A */
 
 /* Get the first bind addr or NULL */
 #define NET_FIRST_BIND_ADDR (server.bindaddr_count ? server.bindaddr[0] : NULL)
@@ -444,6 +446,7 @@ typedef long long mstime_t; /* millisecond time type. */
 #define OBJ_SET 2
 #define OBJ_ZSET 3
 #define OBJ_HASH 4
+#define OBJ_SPATIAL 5
 
 /* Objects encoding. Some kind of objects like Strings and Hashes can be
  * internally represented in multiple ways. The 'encoding' field of the object
@@ -1085,6 +1088,8 @@ extern double R_Zero, R_PosInf, R_NegInf, R_Nan;
 extern dictType hashDictType;
 extern dictType replScriptCacheDictType;
 extern dictType keyptrDictType;
+extern dictType spatialDictType;
+
 
 /*-----------------------------------------------------------------------------
  * Functions prototypes
@@ -1223,6 +1228,7 @@ robj *createIntsetObject(void);
 robj *createHashObject(void);
 robj *createZsetObject(void);
 robj *createZsetZiplistObject(void);
+robj *createSpatialObject(void);
 int getLongFromObjectOrReply(client *c, robj *o, long *target, const char *msg);
 int checkType(client *c, robj *o, int type);
 int getLongLongFromObjectOrReply(client *c, robj *o, long long *target, const char *msg);
@@ -1685,6 +1691,19 @@ void pfcountCommand(client *c);
 void pfmergeCommand(client *c);
 void pfdebugCommand(client *c);
 void latencyCommand(client *c);
+void gsetCommand(client *c);
+void gsetnxCommand(client *c);
+void ggetCommand(client *c);
+void gmsetCommand(client *c);
+void gmgetCommand(client *c);
+void gdelCommand(client *c);
+void glenCommand(client *c);
+void gstrlenCommand(client *c);
+void gkeysCommand(client *c);
+void gvalsCommand(client *c);
+void ggetallCommand(client *c);
+void gexistsCommand(client *c);
+void gscanCommand(client *c);
 
 #if defined(__GNUC__)
 void *calloc(size_t count, size_t size) __attribute__ ((deprecated));

@@ -69,24 +69,27 @@
 
 /* Dup object types to RDB object types. Only reason is readability (are we
  * dealing with RDB types or with in-memory object types?). */
-#define RDB_TYPE_STRING 0
-#define RDB_TYPE_LIST   1
-#define RDB_TYPE_SET    2
-#define RDB_TYPE_ZSET   3
-#define RDB_TYPE_HASH   4
+#define RDB_TYPE_STRING  0
+#define RDB_TYPE_LIST    1
+#define RDB_TYPE_SET     2
+#define RDB_TYPE_ZSET    3
+#define RDB_TYPE_HASH    4
+#define RDB_TYPE_SPATIAL 5
 /* NOTE: WHEN ADDING NEW RDB TYPE, UPDATE rdbIsObjectType() BELOW */
 
 /* Object types for encoded objects. */
-#define RDB_TYPE_HASH_ZIPMAP    9
-#define RDB_TYPE_LIST_ZIPLIST  10
-#define RDB_TYPE_SET_INTSET    11
-#define RDB_TYPE_ZSET_ZIPLIST  12
-#define RDB_TYPE_HASH_ZIPLIST  13
-#define RDB_TYPE_LIST_QUICKLIST 14
+#define RDB_TYPE_HASH_ZIPMAP      9
+#define RDB_TYPE_LIST_ZIPLIST    10
+#define RDB_TYPE_SET_INTSET      11
+#define RDB_TYPE_ZSET_ZIPLIST    12
+#define RDB_TYPE_HASH_ZIPLIST    13
+#define RDB_TYPE_LIST_QUICKLIST  14
+#define RDB_TYPE_SPATIAL_ZIPMAP  15
+#define RDB_TYPE_SPATIAL_ZIPLIST 16
 /* NOTE: WHEN ADDING NEW RDB TYPE, UPDATE rdbIsObjectType() BELOW */
 
 /* Test if a type is an object type. */
-#define rdbIsObjectType(t) ((t >= 0 && t <= 4) || (t >= 9 && t <= 14))
+#define rdbIsObjectType(t) ((t >= 0 && t <= 5) || (t >= 9 && t <= 16))
 
 /* Special RDB opcodes (saved/loaded with rdbSaveType/rdbLoadType). */
 #define RDB_OPCODE_AUX        250

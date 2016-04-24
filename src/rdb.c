@@ -536,6 +536,14 @@ int rdbSaveObjectType(rio *rdb, robj *o) {
             return rdbSaveType(rdb,RDB_TYPE_HASH);
         else
             serverPanic("Unknown hash encoding");
+    case OBJ_SPATIAL:
+        o = (robj*)robjSpatialGetHash(o);
+        if (o->encoding == OBJ_ENCODING_ZIPLIST)
+            return rdbSaveType(rdb,RDB_TYPE_SPATIAL_ZIPLIST);
+        else if (o->encoding == OBJ_ENCODING_HT)
+            return rdbSaveType(rdb,RDB_TYPE_SPATIAL);
+        else
+            serverPanic("Unknown hash encoding");
     default:
         serverPanic("Unknown object type");
     }
@@ -636,7 +644,12 @@ ssize_t rdbSaveObject(rio *rdb, robj *o) {
         } else {
             serverPanic("Unknown sorted set encoding");
         }
-    } else if (o->type == OBJ_HASH) {
+    } else if (o->type == OBJ_HASH || 
+               o->type == OBJ_SPATIAL) 
+    {
+        if (o->type == OBJ_SPATIAL){
+            o = (robj*)robjSpatialGetHash(o);
+        }
         /* Save a hash value */
         if (o->encoding == OBJ_ENCODING_ZIPLIST) {
             size_t l = ziplistBlobLen((unsigned char*)o->ptr);
@@ -666,7 +679,8 @@ ssize_t rdbSaveObject(rio *rdb, robj *o) {
         } else {
             serverPanic("Unknown hash encoding");
         }
-
+    // } else if (o->type == OBJ_SPATIAL) {
+        
     } else {
         serverPanic("Unknown object type");
     }
@@ -1057,7 +1071,7 @@ robj *rdbLoadObject(int rdbtype, rio *rdb) {
         if (zsetLength(o) <= server.zset_max_ziplist_entries &&
             maxelelen <= server.zset_max_ziplist_value)
                 zsetConvert(o,OBJ_ENCODING_ZIPLIST);
-    } else if (rdbtype == RDB_TYPE_HASH) {
+    } else if (rdbtype == RDB_TYPE_HASH || rdbtype == RDB_TYPE_SPATIAL) {
         size_t len;
         int ret;
         sds field, value;
@@ -1117,6 +1131,12 @@ robj *rdbLoadObject(int rdbtype, rio *rdb) {
 
         /* All pairs should be read by now */
         serverAssert(len == 0);
+
+        /* Convert to spatial type if needed. */
+        if (rdbtype == RDB_TYPE_SPATIAL){
+            o = robjSpatialNewHash(o);
+        }
+
     } else if (rdbtype == RDB_TYPE_LIST_QUICKLIST) {
         if ((len = rdbLoadLen(rdb,NULL)) == RDB_LENERR) return NULL;
         o = createQuicklistObject();
@@ -1128,11 +1148,13 @@ robj *rdbLoadObject(int rdbtype, rio *rdb) {
             if (zl == NULL) return NULL;
             quicklistAppendZiplist(o->ptr, zl);
         }
-    } else if (rdbtype == RDB_TYPE_HASH_ZIPMAP  ||
-               rdbtype == RDB_TYPE_LIST_ZIPLIST ||
-               rdbtype == RDB_TYPE_SET_INTSET   ||
-               rdbtype == RDB_TYPE_ZSET_ZIPLIST ||
-               rdbtype == RDB_TYPE_HASH_ZIPLIST)
+    } else if (rdbtype == RDB_TYPE_HASH_ZIPMAP     ||
+               rdbtype == RDB_TYPE_LIST_ZIPLIST    ||
+               rdbtype == RDB_TYPE_SET_INTSET      ||
+               rdbtype == RDB_TYPE_ZSET_ZIPLIST    ||
+               rdbtype == RDB_TYPE_HASH_ZIPLIST    ||
+               rdbtype == RDB_TYPE_SPATIAL_ZIPMAP  ||
+               rdbtype == RDB_TYPE_SPATIAL_ZIPLIST)
     {
         unsigned char *encoded = rdbGenericLoadStringObject(rdb,RDB_LOAD_PLAIN);
         if (encoded == NULL) return NULL;
@@ -1145,7 +1167,8 @@ robj *rdbLoadObject(int rdbtype, rio *rdb) {
          * size as this is an O(N) scan. Eventually everything will get
          * converted. */
         switch(rdbtype) {
-            case RDB_TYPE_HASH_ZIPMAP:
+            case RDB_TYPE_HASH_ZIPMAP: 
+            case RDB_TYPE_SPATIAL_ZIPMAP:
                 /* Convert to ziplist encoded hash. This must be deprecated
                  * when loading dumps created by Redis 2.4 gets deprecated. */
                 {
@@ -1192,6 +1215,7 @@ robj *rdbLoadObject(int rdbtype, rio *rdb) {
                     zsetConvert(o,OBJ_ENCODING_SKIPLIST);
                 break;
             case RDB_TYPE_HASH_ZIPLIST:
+            case RDB_TYPE_SPATIAL_ZIPLIST:
                 o->type = OBJ_HASH;
                 o->encoding = OBJ_ENCODING_ZIPLIST;
                 if (hashTypeLength(o) > server.hash_max_ziplist_entries)
@@ -1200,6 +1224,11 @@ robj *rdbLoadObject(int rdbtype, rio *rdb) {
             default:
                 rdbExitReportCorruptRDB("Unknown encoding");
                 break;
+        }
+
+        /* Convert to spatial type if needed. */
+        if (rdbtype == RDB_TYPE_SPATIAL_ZIPLIST || rdbtype == RDB_TYPE_SPATIAL_ZIPMAP){
+            o = robjSpatialNewHash(o);
         }
     } else {
         rdbExitReportCorruptRDB("Unknown object type");
