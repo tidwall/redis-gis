@@ -1,6 +1,6 @@
 #include "server.h"
 #include "spatial.h"
-#include "wkt.h"
+#include "geom.h"
 
 /* Importing some stuff from t_hash.c but these should exist in server.h */
 #define HASH_SET_TAKE_FIELD (1<<0)
@@ -12,9 +12,41 @@ int hashTypeGetFromZiplist(robj *o, sds field, unsigned char **vstr, unsigned in
 sds hashTypeGetFromHashTable(robj *o, sds field);
 size_t hashTypeGetValueLength(robj *o, sds field);
 
+
+static void addGeomReplyBulkCBuffer(client *c, const void *p, size_t len) {
+    len = len-0; // noop for now.
+    char *wkt = geomEncodeWKT((geom*)p, 0);
+    if (!wkt){
+        addReplyError(c, "failed to encode wkt");
+        return;
+    }
+    addReplyBulkCBuffer(c, wkt, strlen(wkt));
+    geomFreeWKT(wkt);
+}
+
+
+#define OBJ_ENCODING_EMBSTR_SIZE_LIMIT 44
+
+static robj *createGeomStringObject(const char *ptr, size_t len) {
+    char *wkt = geomEncodeWKT((geom*)ptr, 0);
+    if (!wkt){
+        return createRawStringObject("", 0);
+    }
+    robj *o;
+    len = strlen(wkt);
+    if (len <= OBJ_ENCODING_EMBSTR_SIZE_LIMIT){
+        o = createEmbeddedStringObject(wkt,len);
+    } else {
+        o = createRawStringObject(wkt,len);
+    }    
+    geomFreeWKT(wkt);
+    return o;
+}
+
+
 /* These are direct copies from t_hash.c because they're defined as static and 
  * I didn't want to change the source file. */
-static void addHashFieldToReply(client *c, robj *o, sds field) {
+static void addGeomHashFieldToReply(client *c, robj *o, sds field) {
     int ret;
 
     if (o == NULL) {
@@ -32,9 +64,9 @@ static void addHashFieldToReply(client *c, robj *o, sds field) {
             addReply(c, shared.nullbulk);
         } else {
             if (vstr) {
-                addReplyBulkCBuffer(c, vstr, vlen);
+                addGeomReplyBulkCBuffer(c, vstr, vlen);
             } else {
-                addReplyBulkLongLong(c, vll);
+                addReply(c, shared.nullbulk);
             }
         }
 
@@ -43,7 +75,7 @@ static void addHashFieldToReply(client *c, robj *o, sds field) {
         if (value == NULL)
             addReply(c, shared.nullbulk);
         else
-            addReplyBulkCBuffer(c, value, sdslen(value));
+            addGeomReplyBulkCBuffer(c, value, sdslen(value));
     } else {
         serverPanic("Unknown hash encoding");
     }
@@ -56,17 +88,236 @@ static void addHashIteratorCursorToReply(client *c, hashTypeIterator *hi, int wh
         long long vll = LLONG_MAX;
 
         hashTypeCurrentFromZiplist(hi, what, &vstr, &vlen, &vll);
-        if (vstr)
-            addReplyBulkCBuffer(c, vstr, vlen);
-        else
-            addReplyBulkLongLong(c, vll);
+        if (vstr){
+            addGeomReplyBulkCBuffer(c, vstr, vlen);
+        } else {
+            addReply(c, shared.nullbulk);
+        }
     } else if (hi->encoding == OBJ_ENCODING_HT) {
         sds value = hashTypeCurrentFromHashTable(hi, what);
-        addReplyBulkCBuffer(c, value, sdslen(value));
+        addGeomReplyBulkCBuffer(c, value, sdslen(value));
     } else {
         serverPanic("Unknown hash encoding");
     }
 }
+
+
+
+static void scanGeomCallback(void *privdata, const dictEntry *de) {
+    void **pd = (void**) privdata;
+    list *keys = pd[0];
+    robj *o = pd[1];
+    robj *key, *val = NULL;
+
+    if (o == NULL) {
+        sds sdskey = dictGetKey(de);
+        key = createStringObject(sdskey, sdslen(sdskey));
+    } else if (o->type == OBJ_SET) {
+        sds keysds = dictGetKey(de);
+        key = createStringObject(keysds,sdslen(keysds));
+    } else if (o->type == OBJ_HASH) {
+        sds sdskey = dictGetKey(de);
+        sds sdsval = dictGetVal(de);
+        key = createStringObject(sdskey,sdslen(sdskey));
+        val = createGeomStringObject(sdsval,sdslen(sdsval));
+    } else if (o->type == OBJ_ZSET) {
+        sds sdskey = dictGetKey(de);
+        key = createStringObject(sdskey,sdslen(sdskey));
+        val = createStringObjectFromLongDouble(*(double*)dictGetVal(de),0);
+    } else {
+        serverPanic("Type not handled in SCAN callback.");
+    }
+
+    listAddNodeTail(keys, key);
+    if (val) listAddNodeTail(keys, val);
+}
+
+
+static void scanGeomCommand(client *c, robj *o, unsigned long cursor) {
+    int i, j;
+    list *keys = listCreate();
+    listNode *node, *nextnode;
+    long count = 10;
+    sds pat = NULL;
+    int patlen = 0, use_pattern = 0;
+    dict *ht;
+
+    /* Object must be NULL (to iterate keys names), or the type of the object
+     * must be Set, Sorted Set, or Hash. */
+    serverAssert(o == NULL || o->type == OBJ_SET || o->type == OBJ_HASH ||
+                o->type == OBJ_ZSET);
+
+    /* Set i to the first option argument. The previous one is the cursor. */
+    i = (o == NULL) ? 2 : 3; /* Skip the key argument if needed. */
+
+    /* Step 1: Parse options. */
+    while (i < c->argc) {
+        j = c->argc - i;
+        if (!strcasecmp(c->argv[i]->ptr, "count") && j >= 2) {
+            if (getLongFromObjectOrReply(c, c->argv[i+1], &count, NULL)
+                != C_OK)
+            {
+                goto cleanup;
+            }
+
+            if (count < 1) {
+                addReply(c,shared.syntaxerr);
+                goto cleanup;
+            }
+
+            i += 2;
+        } else if (!strcasecmp(c->argv[i]->ptr, "match") && j >= 2) {
+            pat = c->argv[i+1]->ptr;
+            patlen = sdslen(pat);
+
+            /* The pattern always matches if it is exactly "*", so it is
+             * equivalent to disabling it. */
+            use_pattern = !(pat[0] == '*' && patlen == 1);
+
+            i += 2;
+        } else {
+            addReply(c,shared.syntaxerr);
+            goto cleanup;
+        }
+    }
+
+    /* Step 2: Iterate the collection.
+     *
+     * Note that if the object is encoded with a ziplist, intset, or any other
+     * representation that is not a hash table, we are sure that it is also
+     * composed of a small number of elements. So to avoid taking state we
+     * just return everything inside the object in a single call, setting the
+     * cursor to zero to signal the end of the iteration. */
+
+    /* Handle the case of a hash table. */
+    ht = NULL;
+    if (o == NULL) {
+        ht = c->db->dict;
+    } else if (o->type == OBJ_SET && o->encoding == OBJ_ENCODING_HT) {
+        ht = o->ptr;
+    } else if (o->type == OBJ_HASH && o->encoding == OBJ_ENCODING_HT) {
+        ht = o->ptr;
+        count *= 2; /* We return key / value for this type. */
+    } else if (o->type == OBJ_ZSET && o->encoding == OBJ_ENCODING_SKIPLIST) {
+        zset *zs = o->ptr;
+        ht = zs->dict;
+        count *= 2; /* We return key / value for this type. */
+    }
+
+    if (ht) {
+        void *privdata[2];
+        /* We set the max number of iterations to ten times the specified
+         * COUNT, so if the hash table is in a pathological state (very
+         * sparsely populated) we avoid to block too much time at the cost
+         * of returning no or very few elements. */
+        long maxiterations = count*10;
+
+        /* We pass two pointers to the callback: the list to which it will
+         * add new elements, and the object containing the dictionary so that
+         * it is possible to fetch more data in a type-dependent way. */
+        privdata[0] = keys;
+        privdata[1] = o;
+        do {
+            cursor = dictScan(ht, cursor, scanGeomCallback, privdata);
+        } while (cursor &&
+              maxiterations-- &&
+              listLength(keys) < (unsigned long)count);
+    } else if (o->type == OBJ_SET) {
+        int pos = 0;
+        int64_t ll;
+
+        while(intsetGet(o->ptr,pos++,&ll))
+            listAddNodeTail(keys,createStringObjectFromLongLong(ll));
+        cursor = 0;
+    } else if (o->type == OBJ_HASH || o->type == OBJ_ZSET) {
+        unsigned char *p = ziplistIndex(o->ptr,0);
+        unsigned char *vstr;
+        unsigned int vlen;
+        long long vll;
+        int kvm = 0;
+        while(p) {
+            ziplistGet(p,&vstr,&vlen,&vll);
+            if (kvm%2==0){
+               listAddNodeTail(keys,
+                    (vstr != NULL) ? createStringObject((char*)vstr,vlen) :
+                                     createStringObjectFromLongLong(vll));
+            }else{
+                listAddNodeTail(keys,
+                    (vstr != NULL) ? createGeomStringObject((char*)vstr,vlen) :
+                                     createStringObjectFromLongLong(vll));
+            }
+            p = ziplistNext(o->ptr,p);
+            kvm++;
+        }
+        cursor = 0;
+    } else {
+        serverPanic("Not handled encoding in SCAN.");
+    }
+
+    /* Step 3: Filter elements. */
+    node = listFirst(keys);
+    while (node) {
+        robj *kobj = listNodeValue(node);
+        nextnode = listNextNode(node);
+        int filter = 0;
+
+        /* Filter element if it does not match the pattern. */
+        if (!filter && use_pattern) {
+            if (sdsEncodedObject(kobj)) {
+                if (!stringmatchlen(pat, patlen, kobj->ptr, sdslen(kobj->ptr), 0))
+                    filter = 1;
+            } else {
+                char buf[LONG_STR_SIZE];
+                int len;
+
+                serverAssert(kobj->encoding == OBJ_ENCODING_INT);
+                len = ll2string(buf,sizeof(buf),(long)kobj->ptr);
+                if (!stringmatchlen(pat, patlen, buf, len, 0)) filter = 1;
+            }
+        }
+
+        /* Filter element if it is an expired key. */
+        if (!filter && o == NULL && expireIfNeeded(c->db, kobj)) filter = 1;
+
+        /* Remove the element and its associted value if needed. */
+        if (filter) {
+            decrRefCount(kobj);
+            listDelNode(keys, node);
+        }
+
+        /* If this is a hash or a sorted set, we have a flat list of
+         * key-value elements, so if this element was filtered, remove the
+         * value, or skip it if it was not filtered: we only match keys. */
+        if (o && (o->type == OBJ_ZSET || o->type == OBJ_HASH)) {
+            node = nextnode;
+            nextnode = listNextNode(node);
+            if (filter) {
+                kobj = listNodeValue(node);
+                decrRefCount(kobj);
+                listDelNode(keys, node);
+            }
+        }
+        node = nextnode;
+    }
+
+    /* Step 4: Reply to the client. */
+    addReplyMultiBulkLen(c, 2);
+    addReplyBulkLongLong(c,cursor);
+
+    addReplyMultiBulkLen(c, listLength(keys));
+    while ((node = listFirst(keys)) != NULL) {
+        robj *kobj = listNodeValue(node);
+        addReplyBulk(c, kobj);
+        decrRefCount(kobj);
+        listDelNode(keys, node);
+    }
+
+cleanup:
+    listSetFreeMethod(keys,decrRefCountVoid);
+    listRelease(keys);
+}
+
+
 
 
 struct spatial {
@@ -135,22 +386,17 @@ void gsetCommand(client *c) {
     int update;
     robj *o, *h;
     
-    wktGeometry *geom;
-    wktErr err = wktParse(c->argv[3]->ptr, &geom);
-    if (err!=WKT_ERRNONE){
+    geom *g = NULL;
+    int sz = 0;
+    geomErr err = geomDecodeWKT(c->argv[3]->ptr, 0, &g, &sz);
+    if (err!=GEOM_ERR_NONE){
         addReplyError(c,"invalid geometry");
         return;        
     }
     decrRefCount(c->argv[3]);
-    char *text = wktText(geom);
-    if (!text){
-        wktFree(geom);
-        addReplyError(c,"invalid geometry");
-        return;    
-    }
-    c->argv[3] = createRawStringObject(text, strlen(text));
-    wktFreeText(text);
-    wktFree(geom);
+    // for future performance enhancement, don't copy just assign g bytes directly.
+    c->argv[3] = createRawStringObject((char*)g, sz);
+    geomFree(g);
 
 
     if ((o = spatialTypeLookupWriteOrCreate(c,c->argv[1])) == NULL) return;
@@ -166,12 +412,10 @@ void gsetCommand(client *c) {
 
 void ggetCommand(client *c) {
     robj *o, *h;
-
     if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.nullbulk)) == NULL ||
         checkType(c,o,OBJ_SPATIAL)) return;
     h = spatialGetHash(o);
-
-    addHashFieldToReply(c, h, c->argv[2]->ptr);
+    addGeomHashFieldToReply(c, h, c->argv[2]->ptr);
 }
 
 
@@ -188,7 +432,7 @@ void gmgetCommand(client *c) {
 
     addReplyMultiBulkLen(c, c->argc-2);
     for (i = 2; i < c->argc; i++) {
-        addHashFieldToReply(c, h, c->argv[i]->ptr);
+        addGeomHashFieldToReply(c, h, c->argv[i]->ptr);
     }
 }
 
@@ -338,5 +582,5 @@ void gscanCommand(client *c) {
     if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.emptyscan)) == NULL ||
         checkType(c,o,OBJ_SPATIAL)) return;
     h = spatialGetHash(o);        
-    scanGenericCommand(c,h,cursor);
+    scanGeomCommand(c,h,cursor);
 }

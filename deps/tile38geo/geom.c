@@ -41,34 +41,6 @@ const char *geomErrText(geomErr err){
     }
 }
 
-// static double swapDouble(double n) {
-//     double r;
-//     char *toConvert = (char*)&n;
-//     char *toReturn = (char*)&r;
-//     toReturn[0] = toConvert[7];
-//     toReturn[1] = toConvert[6];
-//     toReturn[2] = toConvert[5];
-//     toReturn[3] = toConvert[4];
-//     toReturn[4] = toConvert[3];
-//     toReturn[5] = toConvert[2];
-//     toReturn[6] = toConvert[1];
-//     toReturn[7] = toConvert[0];
-//     return r;
-// }
-
-// static double swapUint32(double n) {
-//     uint32_t r;
-//     char *toConvert = (char*)&n;
-//     char *toReturn = (char*)&r;
-//     toReturn[0] = toConvert[3];
-//     toReturn[1] = toConvert[2];
-//     toReturn[2] = toConvert[1];
-//     toReturn[3] = toConvert[0];
-//     return r;
-// }
-
-
-
 static ctx *ignorews(ctx *c){
     for (;;) {
         switch (c->p[0]) {
@@ -80,7 +52,7 @@ static ctx *ignorews(ctx *c){
         }
     }
 }
-
+/* grow will increase the c->g buffer by len. */
 static ctx *grow(ctx *c, int len){
     if (!c->validBuffer){
         return c;
