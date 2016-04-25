@@ -135,7 +135,26 @@ void gsetCommand(client *c) {
     int update;
     robj *o, *h;
     
+    wktGeometry *geom;
+    wktErr err = wktParse(c->argv[3]->ptr, &geom);
+    if (err!=WKT_ERRNONE){
+        addReplyError(c,"invalid geometry");
+        return;        
+    }
+    decrRefCount(c->argv[3]);
+    char *text = wktText(geom);
+    if (!text){
+        wktFree(geom);
+        addReplyError(c,"invalid geometry");
+        return;    
+    }
+    c->argv[3] = createRawStringObject(text, strlen(text));
+    wktFreeText(text);
+    wktFree(geom);
+
+
     if ((o = spatialTypeLookupWriteOrCreate(c,c->argv[1])) == NULL) return;
+
     h = spatialGetHash(o);
     hashTypeTryConversion(h,c->argv,2,3);
     update = hashTypeSet(h,c->argv[2]->ptr,c->argv[3]->ptr,HASH_SET_COPY);

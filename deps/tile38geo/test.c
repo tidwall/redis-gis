@@ -5,8 +5,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-int test_WKT();
-int test_BTree();
+int test_Geom();
+int test_GeomZ();
+int test_GeomZM();
 
 typedef struct test{
 	char *name;
@@ -14,8 +15,9 @@ typedef struct test{
 } test;
 
 test tests[] = {
-	{ "wkt", test_WKT },
-	{ "btree", test_BTree },
+	{ "geom", test_Geom },
+	{ "geomZ", test_GeomZ },
+	{ "geomZM", test_GeomZM },
 };
 
 void sig_handler(int sig) {

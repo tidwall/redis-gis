@@ -9,14 +9,14 @@ DEBUG= -g
 R_CC=$(CC) $(R_CFLAGS)
 R_LD=$(CC) $(R_LDFLAGS)
 
-all: wkt.o
+all: geom.o
 test: all
-	-@$(R_CC) -o test test.c wkt_test.c wkt.o -I.
+	-@$(R_CC) -o test test.c geom_test.c geom.o -I.
 	-@./test
 
 .PHONY: all
 
-wkt.o: wkt.h wkt.c
+geom.o: geom.h geom.c
 
 .c.o:
 	$(R_CC) -c $<
