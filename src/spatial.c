@@ -360,7 +360,6 @@ cleanup:
 
 struct spatial {
     robj *h;
-    int indexed;
 };
 
 static robj *spatialGetHash(robj *o){
@@ -386,31 +385,18 @@ spatial *spatialNew(){
 }
 
 static void spatialSetValue(spatial *s, sds key, sds value){
-    s = 0;
-    // if (!s->indexed){
-    //     hashTypeIterator *hi = hashTypeInitIterator(s->h);
-    //     while (hashTypeNext(hi) != C_ERR) {
-    //         printf("*");
-    //             printf(" ZIPLIST");
-
-    //             long long vll = LLONG_MAX;
-    //             hashTypeCurrentFromZiplist(hi, what, &vstr, &vlen, &vll);
-    //             if (!vstr){
-    //                 vstr = NULL;
-    //                 vlen = 0;
-    //             }
-        
-    //         } else if (hi->encoding == OBJ_ENCODING_HT) {
-    //             printf(" HT");
-    //         }
-    //         printf("\n");
-    //     }
-    //     s->indexed = 1;
-    // }
-    
-    printf("set: %s: %s\n", key, value);
+    if (0){
+       s = 0;
+    }
+    printf("set: %s: %zu bytes\n", key, sdslen(value));
 }
 
+static void spatialDelValue(spatial *s, sds key){
+    if (0){
+       s = 0;
+    }
+    printf("del: %s\n", key);   
+}
 
 /* robjSpatialNewHash creates a new spatial object with an existing hash.
  * This is is called from rdbLoad(). */
@@ -463,6 +449,7 @@ oom:
 
 void spatialFree(spatial *s){
     if (s){
+        printf("released\n");
         if (s->h){
             freeHashObject(s->h);
         }
@@ -550,8 +537,10 @@ void gdelCommand(client *c) {
     if ((o = lookupKeyWriteOrReply(c,c->argv[1],shared.czero)) == NULL ||
         checkType(c,o,OBJ_SPATIAL)) return;
     h = spatialGetHash(o);
+    spatial *s = o->ptr;
 
     for (j = 2; j < c->argc; j++) {
+        spatialDelValue(s, c->argv[j]->ptr);
         if (hashTypeDelete(h,c->argv[j]->ptr)) {
             deleted++;
             if (hashTypeLength(h) == 0) {
