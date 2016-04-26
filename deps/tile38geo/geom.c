@@ -1,8 +1,38 @@
+/*
+ * Copyright (c) 2016, Josh Baker <joshbaker77@gmail.com>.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ *  * Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
+ *  * Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *  * Neither the name of Redis nor the names of its contributors may be used
+ *    to endorse or promote products derived from this software without
+ *    specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
+ * THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdint.h>
 #include "geom.h"
+#include "grisu3.h"
 
 static geomErr geomDecodeWKTInner(const char *input, geomWKTDecodeOpts opts, geom **g, int *size, int *read);
 
@@ -512,13 +542,6 @@ static geomErr geomDecodeWKTInner(const char *input, geomWKTDecodeOpts opts, geo
     return GEOM_ERR_NONE;
 }
 
-static double geomPointX(uint8_t *g){
-    return ((double*)(g+5))[0];
-}
-static double geomPointY(uint8_t *g){
-    return ((double*)(g+5))[1];
-}
-
 static int geomIsZ(uint8_t *g){
     uint32_t type = *((uint32_t*)(g+1));
     if (type > 3000){
@@ -542,26 +565,6 @@ static int geomIsM(uint8_t *g){
     return 0;
 }
 
-
-static double geomPointZ(uint8_t *g){
-    if (geomIsZ(g)){
-        return ((double*)(g+5))[2];
-    }
-    return 0;
-}
-
-static double geomPointM(uint8_t *g){
-    if (geomIsM(g)){
-        if (geomIsZ(g)){
-            return ((double*)(g+5))[3];
-        } else {
-            return ((double*)(g+5))[2];
-        }
-    }
-    return 0;
-}
-
-
 // static int geomGenericLength(uint8_t *g){
 //     return (int)*((uint32_t*)(g+5));
 // }
@@ -583,57 +586,6 @@ geomType geomGetType(geom *g){
     }
     return (geomType)type;
 }
-
-double geomGetX(geom *g){
-    switch (geomGetType(g)){
-    default:
-        return 0;
-    case GEOM_POINT:
-        return geomPointX((uint8_t*)g);
-    }
-}
-
-double geomGetY(geom *g){
-    switch (geomGetType(g)){
-    default:
-        return 0;
-    case GEOM_POINT:
-        return geomPointY((uint8_t*)g);
-    }    
-}
-
-double geomGetZ(geom *g){
-    switch (geomGetType(g)){
-    default:
-        return 0;
-    case GEOM_POINT:
-        return geomPointZ((uint8_t*)g);
-    }
-}
-
-double geomGetM(geom *g){
-    switch (geomGetType(g)){
-    default:
-        return 0;
-    case GEOM_POINT:
-        return geomPointM((uint8_t*)g);
-    }    
-}
-
-// int geomGetLength(geom *g){
-//     switch (geomGetType(g)){
-//     default:
-//         return 0;
-//     case GREOM
-//     case GEOM_LINESTRING:
-//     case GEOM_LINESTRING:
-//     case GEOM_LINESTRING:
-//     case GEOM_LINESTRING:
-//     case GEOM_LINESTRING:
-//         return geomGenericLength((uint8_t*)g);
-//     }    
-// }
-
 
 static inline char *appendStr(char *str, int *size, int *cap, char *s){
     int l = strlen(s);
@@ -662,15 +614,16 @@ static inline char *appendStr(char *str, int *size, int *cap, char *s){
 }
 
 static char *dstr(double n, char *str){
-    sprintf(str, "%.15f", n);
-    char *p = str+strlen(str)-1;
-    while (*p=='0'&&p>str){
-        *p = 0;
-        p--;
-    }
-    if (*p == '.'){
-        *p = 0;
-    }
+    dtoa_grisu3(n, str);
+    //sprintf(str, "%.15f", n);
+    // char *p = str+nn;
+    // while (*p=='0'&&p>str){
+    //     *p = 0;
+    //     p--;
+    // }
+    // if (*p == '.'){
+    //     *p = 0;
+    // }
     return str;
 }
 
@@ -906,3 +859,40 @@ char *geomEncodeWKT(geom *g, geomWKTEncodeOpts opts){
 geomErr geomDecodeWKT(const char *input, geomWKTDecodeOpts opts, geom **g, int *size){
     return geomDecodeWKTInner(input, opts, g, size, NULL);
 }
+
+geomPoint geomGetPoint(geom *g){
+    geomPoint point;
+    memset(&point, 0, sizeof(point));
+    switch (geomGetType(g)){
+    default:
+        break;        
+    case GEOM_UNKNOWN:
+        break;
+    case GEOM_POINT:
+        point.x = ((double*)(((uint8_t*)g)+5))[0];
+        point.y = ((double*)(((uint8_t*)g)+5))[1];
+        break;
+    }
+    return point;
+}
+
+geomRect geomGetRect(geom *g){
+    geomRect rect;
+    memset(&rect, 0, sizeof(rect));
+    switch (geomGetType(g)){
+    default:
+        break;        
+    case GEOM_UNKNOWN:
+        break;
+    case GEOM_POINT:
+        rect.min.x = ((double*)(((uint8_t*)g)+5))[0];
+        rect.min.y = ((double*)(((uint8_t*)g)+5))[1];
+        rect.max.x = rect.min.x;
+        rect.max.y = rect.min.y;
+        break;
+    }
+    return rect;
+}
+
+
+

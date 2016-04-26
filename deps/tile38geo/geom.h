@@ -65,12 +65,26 @@ typedef enum {
     GEOM_WKT_LEAVE_OPEN = 1<<0,
 } geomWKTDecodeOpts;
 
-typedef unsigned char *geom;
+typedef char *geom;
+
+typedef struct geomPoint {
+    double x, y;
+} geomPoint;
+
+typedef struct geomRect {
+    geomPoint max, min;
+} geomRect;
+
 
 geomErr geomDecodeWKT(const char *input, geomWKTDecodeOpts opts, geom **g, int *size);
 void geomFree(geom *g);
 char *geomEncodeWKT(geom *g, geomWKTEncodeOpts opts);
 void geomFreeWKT(char *wkt);
+geomType geomGetType(geom *g);
+
+geomPoint geomGetPoint(geom *g);
+geomRect geomGetRect(geom *g);
+
 
 #if defined(__cplusplus)
 }

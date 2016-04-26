@@ -1,3 +1,33 @@
+/* Redis Geospatial implementation.
+ *
+ * Copyright (c) 2016, Josh Baker <joshbaker77@gmail.com>
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ *   * Redistributions of source code must retain the above copyright notice,
+ *     this list of conditions and the following disclaimer.
+ *   * Redistributions in binary form must reproduce the above copyright
+ *     notice, this list of conditions and the following disclaimer in the
+ *     documentation and/or other materials provided with the distribution.
+ *   * Neither the name of Redis nor the names of its contributors may be used
+ *     to endorse or promote products derived from this software without
+ *     specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
+
 #include "server.h"
 #include "spatial.h"
 #include "geom.h"
@@ -89,13 +119,21 @@ static void addHashIteratorCursorToReply(client *c, hashTypeIterator *hi, int wh
 
         hashTypeCurrentFromZiplist(hi, what, &vstr, &vlen, &vll);
         if (vstr){
-            addGeomReplyBulkCBuffer(c, vstr, vlen);
+            if (what == OBJ_HASH_VALUE){
+                addGeomReplyBulkCBuffer(c, vstr, vlen);
+            } else{
+                addReplyBulkCBuffer(c, vstr, vlen);
+            }
         } else {
             addReply(c, shared.nullbulk);
         }
     } else if (hi->encoding == OBJ_ENCODING_HT) {
         sds value = hashTypeCurrentFromHashTable(hi, what);
-        addGeomReplyBulkCBuffer(c, value, sdslen(value));
+        if (what == OBJ_HASH_VALUE){
+            addGeomReplyBulkCBuffer(c, value, sdslen(value));
+        }else{
+            addReplyBulkCBuffer(c, value, sdslen(value));
+        }
     } else {
         serverPanic("Unknown hash encoding");
     }
@@ -322,6 +360,7 @@ cleanup:
 
 struct spatial {
     robj *h;
+    int indexed;
 };
 
 static robj *spatialGetHash(robj *o){
@@ -346,13 +385,81 @@ spatial *spatialNew(){
     return s;
 }
 
+static void spatialSetValue(spatial *s, sds key, sds value){
+    s = 0;
+    // if (!s->indexed){
+    //     hashTypeIterator *hi = hashTypeInitIterator(s->h);
+    //     while (hashTypeNext(hi) != C_ERR) {
+    //         printf("*");
+    //             printf(" ZIPLIST");
+
+    //             long long vll = LLONG_MAX;
+    //             hashTypeCurrentFromZiplist(hi, what, &vstr, &vlen, &vll);
+    //             if (!vstr){
+    //                 vstr = NULL;
+    //                 vlen = 0;
+    //             }
+        
+    //         } else if (hi->encoding == OBJ_ENCODING_HT) {
+    //             printf(" HT");
+    //         }
+    //         printf("\n");
+    //     }
+    //     s->indexed = 1;
+    // }
+    
+    printf("set: %s: %s\n", key, value);
+}
+
+
+/* robjSpatialNewHash creates a new spatial object with an existing hash.
+ * This is is called from rdbLoad(). */
 void *robjSpatialNewHash(void *o){
     robj *so = createSpatialObject();
     spatial *s = so->ptr;
     freeHashObject(s->h);
     s->h = o;
+    hashTypeIterator *hi = hashTypeInitIterator(s->h);
+    if (hi->encoding == OBJ_ENCODING_ZIPLIST) {
+        sds key = sdsempty();
+        sds val = sdsempty();
+        while (hashTypeNext(hi) != C_ERR) {
+            long long vll = LLONG_MAX;
+            unsigned char *vstr = NULL;
+            unsigned int vlen = UINT_MAX;
+            hashTypeCurrentFromZiplist(hi, OBJ_HASH_KEY, &vstr, &vlen, &vll);
+            if (vstr){
+                sds nkey = sdscpylen(key, (const char*)vstr, vlen);
+                if (!nkey){
+                    goto oom;
+                }
+                key = nkey;
+                hashTypeCurrentFromZiplist(hi, OBJ_HASH_VALUE, &vstr, &vlen, &vll);
+                if (vstr){
+                    sds nval = sdscpylen(val, (const char*)vstr, vlen);
+                    if (!nval){
+                        goto oom;
+                    }
+                    val = nval;
+                    spatialSetValue(s, key, val);
+                }
+            }
+        }
+        sdsfree(key);
+        sdsfree(val);
+    } else if (hi->encoding == OBJ_ENCODING_HT){
+        while (hashTypeNext(hi) != C_ERR) {
+            sds key = hashTypeCurrentFromHashTable(hi, OBJ_HASH_KEY);
+            sds val = hashTypeCurrentFromHashTable(hi, OBJ_HASH_VALUE);
+            spatialSetValue(s, key, val);
+        }
+    }
     return so;
+oom:
+    serverPanic("out of memory");
+    return NULL;
 }
+
 
 void spatialFree(spatial *s){
     if (s){
@@ -393,17 +500,17 @@ void gsetCommand(client *c) {
         addReplyError(c,"invalid geometry");
         return;        
     }
-    decrRefCount(c->argv[3]);
-    // for future performance enhancement, don't copy just assign g bytes directly.
+    robj *prev = c->argv[3];
     c->argv[3] = createRawStringObject((char*)g, sz);
     geomFree(g);
-
-
     if ((o = spatialTypeLookupWriteOrCreate(c,c->argv[1])) == NULL) return;
-
+    spatial *s = o->ptr;
     h = spatialGetHash(o);
     hashTypeTryConversion(h,c->argv,2,3);
+    spatialSetValue(s, c->argv[2]->ptr, c->argv[3]->ptr);
     update = hashTypeSet(h,c->argv[2]->ptr,c->argv[3]->ptr,HASH_SET_COPY);
+    decrRefCount(c->argv[3]);
+    c->argv[3] = prev;
     addReply(c, update ? shared.czero : shared.cone);
     signalModifiedKey(c->db,c->argv[1]);
     notifyKeyspaceEvent(NOTIFY_HASH,"gset",c->argv[1],c->db->id);
@@ -487,13 +594,27 @@ void gstrlenCommand(client *c) {
 void gsetnxCommand(client *c) {
     robj *o, *h;
     if ((o = spatialTypeLookupWriteOrCreate(c,c->argv[1])) == NULL) return;
+    spatial *s = o->ptr;
     h = spatialGetHash(o);
     hashTypeTryConversion(h,c->argv,2,3);
 
     if (hashTypeExists(h, c->argv[2]->ptr)) {
         addReply(c, shared.czero);
     } else {
+        geom *g = NULL;
+        int sz = 0;
+        geomErr err = geomDecodeWKT(c->argv[3]->ptr, 0, &g, &sz);
+        if (err!=GEOM_ERR_NONE){
+            addReplyError(c,"invalid geometry");
+            return;
+        }
+        robj *prev = c->argv[3];
+        c->argv[3] = createRawStringObject((char*)g, sz);
+        geomFree(g);
+        spatialSetValue(s, c->argv[2]->ptr, c->argv[3]->ptr);
         hashTypeSet(h,c->argv[2]->ptr,c->argv[3]->ptr,HASH_SET_COPY);
+        decrRefCount(c->argv[3]);
+        c->argv[3] = prev;
         addReply(c, shared.cone);
         signalModifiedKey(c->db,c->argv[1]);
         notifyKeyspaceEvent(NOTIFY_HASH,"gset",c->argv[1],c->db->id);
@@ -504,17 +625,30 @@ void gsetnxCommand(client *c) {
 void gmsetCommand(client *c) {
     int i;
     robj *o, *h;
-
     if ((c->argc % 2) == 1) {
         addReplyError(c,"wrong number of arguments for GMSET");
         return;
     }
-
     if ((o = spatialTypeLookupWriteOrCreate(c,c->argv[1])) == NULL) return;
+    spatial *s = o->ptr;
     h = spatialGetHash(o);
     hashTypeTryConversion(h,c->argv,2,c->argc-1);
     for (i = 2; i < c->argc; i += 2) {
+        geom *g = NULL;
+        int sz = 0;
+        geomErr err = geomDecodeWKT(c->argv[i+1]->ptr, 0, &g, &sz);
+        if (err!=GEOM_ERR_NONE){
+            addReplyError(c,"invalid geometry");
+            return;
+        }
+        robj *prev = c->argv[i+1];
+        c->argv[i+1] = createRawStringObject((char*)g, sz);
+        geomFree(g);
+        spatialSetValue(s, c->argv[i]->ptr, c->argv[i+1]->ptr);
         hashTypeSet(h,c->argv[i]->ptr,c->argv[i+1]->ptr,HASH_SET_COPY);
+        decrRefCount(c->argv[i+1]);
+        c->argv[i+1] = prev;
+
     }
     addReply(c, shared.ok);
     signalModifiedKey(c->db,c->argv[1]);

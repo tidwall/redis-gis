@@ -679,8 +679,6 @@ ssize_t rdbSaveObject(rio *rdb, robj *o) {
         } else {
             serverPanic("Unknown hash encoding");
         }
-    // } else if (o->type == OBJ_SPATIAL) {
-        
     } else {
         serverPanic("Unknown object type");
     }
