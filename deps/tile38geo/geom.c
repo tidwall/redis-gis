@@ -894,5 +894,54 @@ geomRect geomGetRect(geom *g){
     return rect;
 }
 
+geomErr geomDecodeWKB(const void *input, size_t length, geom **g, int *size){
+    geomErr err;
+    char *p = (char*)input;
+    if (length==0 || (p[0] != 0 && p[0] != 1)){
+        err = GEOM_ERR_INPUT;
+        goto err;
+    }
+    // TODO: check and translate wkb
+    if (g && size){
+        *g = malloc(length);
+        if (!*g){
+            err = GEOM_ERR_MEMORY;
+            goto err;
+        }
+        memcpy(*g, input, length);
+        *size = length;
+    }
+    return GEOM_ERR_NONE;
+err:
+    return err;
+}
 
+geomErr geomDecode(const void *input, size_t length, geomWKTDecodeOpts opts, geom **g, int *size){
+    char *bytes = (char*)input;
+    if (length > 0){
+        switch (bytes[0]){
+        default:
+            return geomDecodeWKT(input, opts, g, size);
+        case 0: case 1:
+            return geomDecodeWKB(input, length, g, size);
+        case '{':
+            // future geojson support
+            return GEOM_ERR_UNSUPPORTED;
+        case '\t': case ' ': case '\r': case '\v': case '\n': case '\f':
+            for (int i=0;i<length;i++){
+                switch (bytes[i]){
+                default:
+                    return geomDecodeWKT(input, opts, g, size);
+                case '\t': case ' ': case '\r': case '\v': case '\n': case '\f':
+                    continue;
+                case '{':
+                    // future geojson support
+                    return GEOM_ERR_UNSUPPORTED;
+                }
+            }
+            break;
+        }
+    }
+    return GEOM_ERR_INPUT;
+}
 

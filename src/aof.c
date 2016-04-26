@@ -980,6 +980,13 @@ int rewriteHashObject(rio *r, robj *key, robj *o) {
     return 1;
 }
 
+/* Emit the commands needed to rebuild a spatial object.
+ * The function returns 0 on error, 1 on success. */
+int rewriteSpatialObject(rio *r, robj *key, robj *o) {
+    return rewriteHashObject(r, key, robjSpatialGetHash(o));
+}
+
+
 /* This function is called by the child rewriting the AOF file to read
  * the difference accumulated from the parent into a buffer, that is
  * concatenated at the end of the rewrite. */
@@ -1072,6 +1079,8 @@ int rewriteAppendOnlyFile(char *filename) {
                 if (rewriteSortedSetObject(&aof,&key,o) == 0) goto werr;
             } else if (o->type == OBJ_HASH) {
                 if (rewriteHashObject(&aof,&key,o) == 0) goto werr;
+            } else if (o->type == OBJ_SPATIAL) {
+                if (rewriteSpatialObject(&aof,&key,o) == 0) goto werr;
             } else {
                 serverPanic("Unknown object type");
             }

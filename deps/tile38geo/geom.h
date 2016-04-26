@@ -77,6 +77,11 @@ typedef struct geomRect {
 
 
 geomErr geomDecodeWKT(const char *input, geomWKTDecodeOpts opts, geom **g, int *size);
+geomErr geomDecodeWKB(const void *input, size_t length, geom **g, int *size);
+// geomDecode auto detects the input, WKT or WKB
+geomErr geomDecode(const void *input, size_t length, geomWKTDecodeOpts opts, geom **g, int *size);
+
+
 void geomFree(geom *g);
 char *geomEncodeWKT(geom *g, geomWKTEncodeOpts opts);
 void geomFreeWKT(char *wkt);

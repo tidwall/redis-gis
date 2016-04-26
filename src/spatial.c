@@ -482,12 +482,12 @@ void gsetCommand(client *c) {
     
     geom *g = NULL;
     int sz = 0;
-    geomErr err = geomDecodeWKT(c->argv[3]->ptr, 0, &g, &sz);
+    geomErr err = geomDecode(c->argv[3]->ptr, sdslen(c->argv[3]->ptr), 0, &g, &sz);
     if (err!=GEOM_ERR_NONE){
         addReplyError(c,"invalid geometry");
         return;        
     }
-    robj *prev = c->argv[3];
+    decrRefCount(c->argv[3]);
     c->argv[3] = createRawStringObject((char*)g, sz);
     geomFree(g);
     if ((o = spatialTypeLookupWriteOrCreate(c,c->argv[1])) == NULL) return;
@@ -496,8 +496,6 @@ void gsetCommand(client *c) {
     hashTypeTryConversion(h,c->argv,2,3);
     spatialSetValue(s, c->argv[2]->ptr, c->argv[3]->ptr);
     update = hashTypeSet(h,c->argv[2]->ptr,c->argv[3]->ptr,HASH_SET_COPY);
-    decrRefCount(c->argv[3]);
-    c->argv[3] = prev;
     addReply(c, update ? shared.czero : shared.cone);
     signalModifiedKey(c->db,c->argv[1]);
     notifyKeyspaceEvent(NOTIFY_HASH,"gset",c->argv[1],c->db->id);
@@ -592,18 +590,16 @@ void gsetnxCommand(client *c) {
     } else {
         geom *g = NULL;
         int sz = 0;
-        geomErr err = geomDecodeWKT(c->argv[3]->ptr, 0, &g, &sz);
+        geomErr err = geomDecode(c->argv[3]->ptr, sdslen(c->argv[3]->ptr), 0, &g, &sz);
         if (err!=GEOM_ERR_NONE){
             addReplyError(c,"invalid geometry");
             return;
         }
-        robj *prev = c->argv[3];
+        decrRefCount(c->argv[3]);
         c->argv[3] = createRawStringObject((char*)g, sz);
         geomFree(g);
         spatialSetValue(s, c->argv[2]->ptr, c->argv[3]->ptr);
         hashTypeSet(h,c->argv[2]->ptr,c->argv[3]->ptr,HASH_SET_COPY);
-        decrRefCount(c->argv[3]);
-        c->argv[3] = prev;
         addReply(c, shared.cone);
         signalModifiedKey(c->db,c->argv[1]);
         notifyKeyspaceEvent(NOTIFY_HASH,"gset",c->argv[1],c->db->id);
@@ -625,19 +621,16 @@ void gmsetCommand(client *c) {
     for (i = 2; i < c->argc; i += 2) {
         geom *g = NULL;
         int sz = 0;
-        geomErr err = geomDecodeWKT(c->argv[i+1]->ptr, 0, &g, &sz);
+        geomErr err = geomDecode(c->argv[i+1]->ptr, sdslen(c->argv[i+1]->ptr), 0, &g, &sz);
         if (err!=GEOM_ERR_NONE){
             addReplyError(c,"invalid geometry");
             return;
         }
-        robj *prev = c->argv[i+1];
+        decrRefCount(c->argv[i+1]);
         c->argv[i+1] = createRawStringObject((char*)g, sz);
         geomFree(g);
         spatialSetValue(s, c->argv[i]->ptr, c->argv[i+1]->ptr);
         hashTypeSet(h,c->argv[i]->ptr,c->argv[i+1]->ptr,HASH_SET_COPY);
-        decrRefCount(c->argv[i+1]);
-        c->argv[i+1] = prev;
-
     }
     addReply(c, shared.ok);
     signalModifiedKey(c->db,c->argv[1]);
