@@ -11,7 +11,7 @@ R_LD=$(CC) $(R_LDFLAGS)
 
 all: geom.o grisu3.o qtree.o
 test: all
-	-@$(R_CC) -o test test.c geom_test.c geom.o qtree.o grisu3.o -I.
+	-@$(R_CC) -o test test.c geom_test.c qtree_test.c geom.o qtree.o grisu3.o -I.
 	-@./test
 
 .PHONY: all

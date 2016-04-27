@@ -31,13 +31,13 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "test.h"
 
 int test_Geom();
 int test_GeomZ();
 int test_GeomZM();
-int test_QTree();
-int test_QTreeGeoInsert();
+int test_QTreeInsert();
 
 typedef struct test{
 	char *name;
@@ -48,10 +48,8 @@ test tests[] = {
 	{ "geom", test_Geom },
 	{ "geomZ", test_GeomZ },
 	{ "geomZM", test_GeomZM },
-	{ "qtree", test_QTree },
-	{ "qtreeGeoInsert", test_QTreeGeoInsert },
+	{ "qtreeInsert", test_QTreeInsert },
 };
-
 
 static int abort_handled = 0;
 void __tassert_fail(const char *what, const char *file, int line, const char *func){
@@ -71,6 +69,18 @@ void sig_handler(int sig) {
 	}
 	printf("\x1b[0m\n");
 	exit(1);
+}
+
+static clock_t start_c = 0;
+static clock_t stop_c = 0;
+
+void stopClock(){
+	stop_c = clock();
+}
+
+void restartClock(){
+	start_c = clock();
+	stop_c = 0;
 }
 
 int main(int argc, const char **argv) {
@@ -103,18 +113,29 @@ int main(int argc, const char **argv) {
 
 	for (int i=0;i<sizeof(tests)/sizeof(test);i++){
 		test t = tests[i];
-
 		if (!(strlen(run) == 0 || strstr(t.name, run) != 0)){
 			continue;
 		}
 		char label[50];
-		sprintf(label, "  testing %s ... ", t.name); 
-		fprintf(stdout, "%-35s", label);
+		sprintf(label, "  testing %s", t.name); 
+		fprintf(stdout, "%-30s", label);
 		fflush(stdout);
-		if (!t.test()){
+		restartClock();
+		int res = t.test();
+		if (stop_c == 0){
+			stopClock();
+		}
+		double elapsed = ((double)(stop_c-start_c)/(double)CLOCKS_PER_SEC);
+		if (!res){
 			printf("\x1b[31m[failed]\x1b[0m\n");
 		} else{
-			printf("\x1b[32m[ok]\x1b[0m\n");
+			printf("\x1b[32m[ok]\x1b[0m");
+			printf(" %6.2f secs", elapsed);
+			if (res > 1){
+				double opss = ((double)res)/elapsed;
+				printf(", op/s %.0f", opss);
+			}
+			printf("\n");
 		}
 	}
 }

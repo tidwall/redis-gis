@@ -15,6 +15,9 @@ extern "C" {
 
 void __tassert_fail(const char *what, const char *file, int line, const char *func);
 
+void stopClock();
+void restartClock();
+
 #if defined(__cplusplus)
 }
 #endif

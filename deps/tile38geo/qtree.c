@@ -1,15 +1,38 @@
+/*
+ * Copyright (c) 2016, Josh Baker <joshbaker77@gmail.com>.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ *  * Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
+ *  * Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *  * Neither the name of Redis nor the names of its contributors may be used
+ *    to endorse or promote products derived from this software without
+ *    specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
+ * THE POSSIBILITY OF SUCH DAMAGE.
+ */
 
-//#include "geom.h"
 #include <string.h>
 #include <stdlib.h>
-#include <assert.h>
-#include <stdio.h>
-#include <math.h>
-#include <time.h>
+#include "qtree.h"
 
-
-const int MAX_POINTS = 2;
-const int APPEND_GROWTH = 1; // Set 'true' for faster inserts, Set 'false' for smaller memory size
+const int MAX_POINTS = 32;
+const int APPEND_GROWTH = 0; // Set 'true' for faster inserts, Set 'false' for smaller memory size
 
 typedef struct node node;
 
@@ -26,6 +49,31 @@ typedef struct node {
     point *points;
     node **nodes;
 } node;
+
+typedef struct qtree {
+    node *root;
+} qtree;
+
+typedef struct splitResult {
+    double minX, minY, maxX, maxY;
+} splitResult;
+
+typedef struct stackItem {
+    node *n;
+    int pointIdx;
+    int quadIdx;
+} stackItem;
+
+typedef struct qtreeIterator{
+    int len;
+    int cap;
+    stackItem *stack;
+    double minX, minY, maxX, maxY; // search bounds
+    int mem;     // out of memory error
+
+    double x, y; // result x, y
+    void *item;  // result item
+} qtreeIterator;
 
 static node *nodeNew(int quad, double minX, double minY, double maxX, double maxY){
     node *n = malloc(sizeof(node));
@@ -67,11 +115,6 @@ static void nodeFree(node *n, int freeItems){
     }
 }
 
-typedef struct qtree {
-    node *root;
-} qtree;
-
-
 qtree *qtreeNew(double minX, double minY, double maxX, double maxY){
     qtree *t = malloc(sizeof(qtree));
     if (!t){
@@ -86,7 +129,7 @@ qtree *qtreeNew(double minX, double minY, double maxX, double maxY){
     return t;
 }
 
-static void qtreeFreeAndItems(qtree *t, int freeItems){
+void qtreeFreeAndItems(qtree *t, int freeItems){
     if (t){
         nodeFree(t->root, freeItems);
         free(t);
@@ -116,11 +159,7 @@ static double nodeClipY(node *n, double y){
     return y;
 }
 
-typedef struct splitResult {
-    double minX, minY, maxX, maxY;
-} splitResult;
-
-splitResult split(int quad, double minX, double minY, double maxX, double maxY){
+static splitResult split(int quad, double minX, double minY, double maxX, double maxY){
     splitResult sr;
     switch (quad){
     default:
@@ -254,27 +293,6 @@ int qtreeRemove(qtree *t, double x, double y, void *item){
     return nodeRemove(t->root, nodeClipX(t->root, x), nodeClipY(t->root, y), item);
 }
 
-typedef struct stackItem {
-    node *n;
-    int pointIdx;
-    int quadIdx;
-} stackItem;
-
-
-
-typedef struct qtreeIterator{
-    int len;
-    int cap;
-    stackItem *stack;
-    double minX, minY, maxX, maxY; // search bounds
-    int mem;     // out of memory error
-
-    double x, y; // result x, y
-    void *item;  // result item
-    // int stored;  // result is stored
-} qtreeIterator;
-
-
 static int pushStack(qtreeIterator *qi, node *n){
     if (qi->len == qi->cap){
         int cap = qi->cap;
@@ -371,180 +389,4 @@ int qtreeIteratorNext(qtreeIterator *qi){
     }
     qi->len--;
     return qtreeIteratorNext(qi);
-}
-
-
-// randd creates a random double [1-0].
-static double randd(){
-    return ((rand()%RAND_MAX) / (double)RAND_MAX);
-}
-
-// randx create a random longitude.
-static double randx() {
-    return randd() * 360.0 - 180.0;
-}
-
-// randy create a random latitude.
-static double randy() {
-    return randd() * 180.0 - 90.0;
-}
-
-static point randPoint(){
-    point p;
-    p.x = randx();
-    p.y = randy();
-    p.item = malloc(100);
-    assert(p.item);
-    sprintf(p.item, "%fx%f", p.x, p.y);
-    return p;
-}
-
-int test_QTreeGeoInsert(){
-    srand(time(NULL)/clock());
-
-    // GeoInsert
-    qtree *t = qtreeNew(-180, -90, 180, 90);
-    assert(t);
-    int l = 50000;
-    for (int i = 0; i < l; i++) {
-        point p = randPoint();
-        assert(qtreeInsert(t, p.x, p.y, p.item));
-    }
-    int count = 0;
-    qtreeIterator *qi = qtreeNewIterator(t, -180, -90, 180, 90);
-    while (qtreeIteratorNext(qi)){
-        count++;
-    }
-    qtreeFreeIterator(qi);
-    assert(count == l);
-    qtreeFreeAndItems(t, 1);
-    return 1;
-}
-
-int test_QTree(){
-    
-
-    // count := 0
-    // tr.Search(-180, -90, 180, 90, func(item Item) bool {
-    //     count++
-    //     return true
-    // })
-    // if count != l {
-    //     t.Fatalf("count == %d, expect %d", count, l)
-    // }
-
-
-
-    // printf("\n");
-    // // int res;
-    // // qtree *t = qtreeNew(0,0,10,10);
-    // // assert(t);
-    // // printf("add 0x0\n");
-    // // res = qtreeInsert(t, 0, 0, "0x0");
-    // // assert(res);
-    // // printf("add 1x1\n");
-    // // res = qtreeInsert(t, 1, 1, "1x1");
-    // // assert(res);
-    // // printf("add 2x2\n");
-    // // res = qtreeInsert(t, 2, 2, "2x2");
-    // // assert(res);
-    // // printf("add 3x3\n");
-    // // res = qtreeInsert(t, 3, 3, "3x3");
-    // // assert(res);
-    // // printf("add 4x4\n");
-    // // res = qtreeInsert(t, 4, 4, "4x4");
-    // // assert(res);
-    // // printf("add 5x5\n");
-    // // res = qtreeInsert(t, 5, 5, "5x5");
-    // // assert(res);
-    // // printf("add 6x6\n");
-    // // res = qtreeInsert(t, 6, 6, "6x6");
-    // // assert(res);
-    // // //
-    // // printf("count: %d\n", qtreeCount(t));
-    // // res = qtreeRemove(t, 6, 6, "6x6");
-    // // assert(res);
-    // // printf("count: %d\n", qtreeCount(t));    
-    // // res = qtreeRemove(t, 1, 1, "1x1");
-    // // assert(res);
-    // // // printf("count: %d\n", qtreeCount(t));    
-
-
-    // // qtreeIterator *qi = qtreeNewIterator(t, 0, 0, 10, 10);
-    // // assert(qi);
-    // // while (qtreeIteratorNext(qi)){
-    // //     printf("%s\n", qi->item);
-    // // }
-
-
-
-    // // qtreeFreeIterator(qi);
-
-    // double maxx = 10;
-    // double maxy = 10;
-    // int res;
-    // qtree *t = qtreeNew(0,0,maxx,maxy);
-    // assert(t != NULL);
-    // char **mem = NULL;
-    // int n = 0;
-    // for (int y=0;y<maxx;y+=1){
-    //     for (int x=0;x<maxy;x+=1){
-    //         mem = realloc(mem, (n+1)*sizeof(char*));
-    //         assert(mem);
-    //         mem[n] = malloc(100);
-    //         assert(mem[n]);
-    //         sprintf(mem[n], "%dx%d", x, y);
-    //         //printf("%s\n", mem[n]);
-    //         res = qtreeInsert(t, x, y, mem[n]);
-    //         assert(res);
-    //         n++;
-    //     }
-    // }
-    // assert(n == (int)(maxx*maxy));
-    // assert(qtreeCount(t) == n);
-
-
-
-
-    // int count = 0;
-    // qtreeIterator *si = qtreeNewIterator(t, 0, 0, 0, 0);
-    // assert(si != NULL);
-    // while (qtreeIteratorNext(si)){
-    //     count++;
-    // }
-    // assert(!si->mem);
-    // qtreeFreeIterator(si);
-    // assert(count==1);
-
-
-    // for (int y=0;y<maxx;y+=1){
-    //     for (int x=0;x<maxy;x+=1){
-    //         printf("%d, %d\n", x, y);
-    //         if (x == MAX_POINTS && y == 0){
-    //             printf("%dx0\n", MAX_POINTS);
-    //         }
-    //         int count = 0;
-    //         qtreeIterator *si = qtreeNewIterator(t, x, y, x, y);
-    //         assert(si != NULL);
-    //         while (qtreeIteratorNext(si)){
-    //             count++;
-    //         }
-    //         assert(!si->mem);
-    //         qtreeFreeIterator(si);
-    //         assert(count==1);
-    //     }
-    // }
-
-    // // //printf("%3.0f, %3.0f, %s\n", si->x, si->y, si->item);
-
-    // // for (int i=0;i<n;i++){
-    // //     free(mem[i]);
-    // // }
-    // // free(mem);
-
-    // // qtreeFree(t);
-
-
-
-    return 1;
 }
