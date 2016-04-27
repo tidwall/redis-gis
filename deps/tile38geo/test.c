@@ -31,6 +31,7 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
+#include "test.h"
 
 int test_Geom();
 int test_GeomZ();
@@ -51,9 +52,25 @@ test tests[] = {
 	{ "qtreeGeoInsert", test_QTreeGeoInsert },
 };
 
+
+static int abort_handled = 0;
+void __tassert_fail(const char *what, const char *file, int line, const char *func){
+	printf("\x1b[31m[failed]\x1b[0m\n");
+	printf("    fail: assert(%s)\n    func: %s\n    file: %s\n    line: %d\n", what, func, file, line);
+	abort_handled = 1;
+	abort();
+}
+
 void sig_handler(int sig) {
+	if (!abort_handled){
+		printf("\x1b[31m[failed]\x1b[0m\n");
+		if (sig == SIGABRT){
+			printf("    \x1b[33muse \"test.h\" for more details.\x1b[0m\n");
+		}
+		abort_handled = 1;
+	}
 	printf("\x1b[0m\n");
-	exit(-1);
+	exit(1);
 }
 
 int main(int argc, const char **argv) {
@@ -61,6 +78,7 @@ int main(int argc, const char **argv) {
 	signal(SIGTERM, sig_handler);
 	signal(SIGHUP, sig_handler);
 	signal(SIGINT, sig_handler);
+	signal(SIGABRT, sig_handler);
 
 	const char *run = getenv("RUNTEST");
 	if (run == NULL){
@@ -90,7 +108,7 @@ int main(int argc, const char **argv) {
 			continue;
 		}
 		char label[50];
-		sprintf(label, "    Test %s ... ", t.name); 
+		sprintf(label, "  testing %s ... ", t.name); 
 		fprintf(stdout, "%-35s", label);
 		fflush(stdout);
 		if (!t.test()){
