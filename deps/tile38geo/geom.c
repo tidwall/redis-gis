@@ -34,7 +34,7 @@
 #include "geom.h"
 #include "grisu3.h"
 
-static geomErr geomDecodeWKTInner(const char *input, geomWKTDecodeOpts opts, geom **g, int *size, int *read);
+static geomErr geomDecodeWKTInner(const char *input, geomWKTDecodeOpts opts, geom *g, int *size, int *read);
 
 typedef struct ctx{
     geomErr err;
@@ -381,7 +381,7 @@ static ctx *decodeSeriesSegment(ctx *c, int level){
         c = ignorews(c);
         if (level<0){
             // decode geometries
-            geom *g = NULL;
+            geom g = NULL;
             int sz = 0;
             int read = 0;
             geomErr err = geomDecodeWKTInner(c->p, c->opts|GEOM_WKT_LEAVE_OPEN, &g, &sz, &read);
@@ -500,7 +500,7 @@ ctx *geomDecodeGeometry(ctx *c){
     return c;
 }
 
-static geomErr geomDecodeWKTInner(const char *input, geomWKTDecodeOpts opts, geom **g, int *size, int *read){
+static geomErr geomDecodeWKTInner(const char *input, geomWKTDecodeOpts opts, geom *g, int *size, int *read){
     if (input == 0 || *input == 0){
         return GEOM_ERR_INPUT; 
     }
@@ -533,7 +533,7 @@ static geomErr geomDecodeWKTInner(const char *input, geomWKTDecodeOpts opts, geo
         }
     }
     if (g && size){
-        *g = (geom*)c->g;
+        *g = (geom)c->g;
         *size = c->len;
     }
     if (read){
@@ -572,7 +572,7 @@ static int geomIsM(uint8_t *g){
 ////////////////////////////////////////////////
 // public apis
 ////////////////////////////////////////////////
-geomType geomGetType(geom *g){
+geomType geomGetType(geom g){
     uint32_t type = *((uint32_t*)((uint8_t*)(g)+1));
     if (type > 3000){
         type = type-3000;
@@ -634,7 +634,7 @@ void geomFreeWKT(char *wkt){
 }
 
 
-static char *geomEncodeWKTInner(geom *g, geomWKTEncodeOpts opts, int *read){
+static char *geomEncodeWKTInner(geom g, geomWKTEncodeOpts opts, int *read){
     #define APPEND(s) {if (!(str = appendStr(str, &size, &cap, (s)))) goto oom;}
     #define APPEND_POINT(){\
         APPEND(dstr(*((double*)gb), output));\
@@ -817,7 +817,7 @@ static char *geomEncodeWKTInner(geom *g, geomWKTEncodeOpts opts, int *read){
                 APPEND(",");
             }
             int read = 0;
-            wkt = geomEncodeWKTInner((geom*)gb, opts, &read);
+            wkt = geomEncodeWKTInner((geom)gb, opts, &read);
             if (!wkt){
                 goto oom;
             }
@@ -846,21 +846,21 @@ oom:
     return NULL;
 }
 
-void geomFree(geom *g){
+void geomFree(geom g){
     if (g){
         free(g);
     }
 }
 
-char *geomEncodeWKT(geom *g, geomWKTEncodeOpts opts){
+char *geomEncodeWKT(geom g, geomWKTEncodeOpts opts){
     return geomEncodeWKTInner(g, opts, NULL);
 }
 
-geomErr geomDecodeWKT(const char *input, geomWKTDecodeOpts opts, geom **g, int *size){
+geomErr geomDecodeWKT(const char *input, geomWKTDecodeOpts opts, geom *g, int *size){
     return geomDecodeWKTInner(input, opts, g, size, NULL);
 }
 
-geomPoint geomGetPoint(geom *g){
+geomPoint geomGetPoint(geom g){
     geomPoint point;
     memset(&point, 0, sizeof(point));
     switch (geomGetType(g)){
@@ -876,7 +876,7 @@ geomPoint geomGetPoint(geom *g){
     return point;
 }
 
-geomRect geomGetRect(geom *g){
+geomRect geomGetRect(geom g){
     geomRect rect;
     memset(&rect, 0, sizeof(rect));
     switch (geomGetType(g)){
@@ -894,14 +894,31 @@ geomRect geomGetRect(geom *g){
     return rect;
 }
 
-geomErr geomDecodeWKB(const void *input, size_t length, geom **g, int *size){
+geomErr geomDecodeWKB(const void *input, size_t length, geom *g, int *size){
     geomErr err;
     char *p = (char*)input;
-    if (length==0 || (p[0] != 0 && p[0] != 1)){
+    if (length==0){
         err = GEOM_ERR_INPUT;
         goto err;
     }
-    // TODO: check and translate wkb
+    // TODO: check and translate wkb BE/LE to host and verify that the binary is correct.
+    // Until that happens, crashes could occur when loading data from a incompatible 
+    // byte order CPU, and buffer overflows for invalid inputs.
+    switch (p[0]){
+    default:
+        err = GEOM_ERR_INPUT;
+        goto err;
+    case 0:
+        if (LITTLE_ENDIAN){
+            err = GEOM_ERR_INPUT;
+            goto err;
+        }
+    case 1:
+        if (!LITTLE_ENDIAN){
+            err = GEOM_ERR_INPUT;
+            goto err;
+        }
+    }
     if (g && size){
         *g = malloc(length);
         if (!*g){
@@ -916,7 +933,7 @@ err:
     return err;
 }
 
-geomErr geomDecode(const void *input, size_t length, geomWKTDecodeOpts opts, geom **g, int *size){
+geomErr geomDecode(const void *input, size_t length, geomWKTDecodeOpts opts, geom *g, int *size){
     char *bytes = (char*)input;
     if (length > 0){
         switch (bytes[0]){

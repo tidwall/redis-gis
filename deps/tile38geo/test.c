@@ -35,6 +35,8 @@
 int test_Geom();
 int test_GeomZ();
 int test_GeomZM();
+int test_QTree();
+int test_QTreeGeoInsert();
 
 typedef struct test{
 	char *name;
@@ -45,6 +47,8 @@ test tests[] = {
 	{ "geom", test_Geom },
 	{ "geomZ", test_GeomZ },
 	{ "geomZM", test_GeomZM },
+	{ "qtree", test_QTree },
+	{ "qtreeGeoInsert", test_QTreeGeoInsert },
 };
 
 void sig_handler(int sig) {
@@ -82,12 +86,12 @@ int main(int argc, const char **argv) {
 	for (int i=0;i<sizeof(tests)/sizeof(test);i++){
 		test t = tests[i];
 
-		if (!(strlen(run) == 0 || strcmp(run, t.name) == 0)){
+		if (!(strlen(run) == 0 || strstr(t.name, run) != 0)){
 			continue;
 		}
 		char label[50];
 		sprintf(label, "    Test %s ... ", t.name); 
-		fprintf(stdout, "%-25s", label);
+		fprintf(stdout, "%-35s", label);
 		fflush(stdout);
 		if (!t.test()){
 			printf("\x1b[31m[failed]\x1b[0m\n");

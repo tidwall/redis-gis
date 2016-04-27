@@ -40,13 +40,13 @@ char *randgeometrycollection(int vary, int dim);
 // parseSerializeAndCompare parses, serializes, parses again, serializes again
 // and compares the the first and second serialized strings.
 void parseSerializeAndCompare(const char *input){
-    geom *g = NULL;
+    geom g = NULL;
     int sz = 0;
     geomErr err = geomDecode(input, strlen(input), 0, &g, &sz);
     assert(err == GEOM_ERR_NONE);
     char *text1 = geomEncodeWKT(g, 0);
     assert(text1 != NULL);
-    geom *g2 = NULL;
+    geom g2 = NULL;
     int sz2 = 0;
     err = geomDecode(g, sz, 0, &g2, &sz2);
     assert(err == GEOM_ERR_NONE);
