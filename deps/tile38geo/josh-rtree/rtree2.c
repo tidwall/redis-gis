@@ -21,13 +21,6 @@ typedef struct nodeT nodeT;
 typedef struct rectT rectT;
 typedef struct listNodeT listNodeT;
 typedef struct partitionVarsT partitionVarsT;
-typedef struct RTree RTree;
-//typedef struct Item Item;
-
-// struct Item {
-// 	double minX, minY, maxX, maxY;
-// 	void *ptr;
-// };
 
 /// Minimal bounding rectangle (n-dimensional)
 struct rectT {
@@ -77,12 +70,6 @@ struct partitionVarsT {
 	double  coverSplitArea;
 };
 
-// RTree is an implementation of an rtree
-struct RTree {
-	nodeT *root;
-};
-
-
 static inline rectT itemRect(double minX, double minY, double maxX, double maxY, void *ptr) {
 	rectT r;
 	r.min[0] = minX;
@@ -98,14 +85,13 @@ static inline double min(double a, double b) {
 	}
 	return b;
 }
+
 static inline double max(double a, double b) {
 	if (a > b) {
 		return a;
 	}
 	return b;
 }
-
-
 
 static bool insertRect(rectT rect, void *item, nodeT **root, int level);
 static bool insertRectRec(rectT rect, void *item, nodeT *node, nodeT **newNode, int level);
@@ -130,7 +116,6 @@ static void reInsert(nodeT *node, listNodeT **listNode);
 static bool overlap(rectT rectA, rectT rectB);
 static void disconnectBranch(nodeT *node, int index);
 
-
 static void freeNode(nodeT *node){
 	if (!node){
 		return;
@@ -141,35 +126,6 @@ static void freeNode(nodeT *node){
 		}
 	}
 	free(node);
-}
-
-// New creates a new RTree
-RTree *rtreeNew() {
-	RTree *tr = malloc(sizeof(RTree));
-	assert(tr);
-	memset(tr, 0, sizeof(RTree));
-	return tr;
-}
-
-void rtreeFree(RTree *tr){
-	if (!tr){
-		return;
-	}
-	if (tr->root){
-		freeNode(tr->root);
-	}
-	free(tr);
-}
-
-// Insert inserts item into rtree
-int rtreeInsert(RTree *tr, double minX, double minY, double maxX, double maxY, void *item) {
-	if (!tr->root) {
-		tr->root = malloc(sizeof(nodeT));
-		assert(tr->root);
-		memset(tr->root, 0, sizeof(nodeT));
-	}
-	insertRect(itemRect(minX, minY, maxX, maxY, item), item, &(tr->root), 0);
-	return 1;
 }
 
 // Insert a data rectangle into an index structure.
@@ -309,6 +265,7 @@ static double rectSphericalVolume(rectT rect) {
 		sumOfSquares += halfExtent * halfExtent;
 	}
 	radius = sqrt(sumOfSquares);
+	// Pow maybe slow, so test for common dims like 2,3 and just use x*x, x*x*x.
 	return radius * radius * UNIT_SPHERE_VOLUME;
 }
 
@@ -535,15 +492,6 @@ static void classify(int index, int group, partitionVarsT *parVars) {
 	parVars->count[group]++;
 }
 
-// Count return the number of items in rtree.
-int rtreeCount(RTree *tr) {
-	if (!tr || !tr->root){
-		return 0;
-	}
-	return countRec(tr->root, 0);
-}
-
-
 static int countRec(nodeT *node, int counter) {
 	if (node->level > 0) { // not a leaf node
 		for (int index = 0; index < node->count; index++) {
@@ -553,14 +501,6 @@ static int countRec(nodeT *node, int counter) {
 		counter += node->count;
 	}
 	return counter;
-}
-
-// Remove removes item from rtree
-int rtreeRemove(RTree *tr, double minX, double minY, double maxX, double maxY, void *item) {
-	if (tr->root) {
-		removeRect(itemRect(minX, minY, maxX, maxY, item), item, &(tr->root));
-	}
-	return 1;
 }
 
 // Delete a data rectangle from an index structure.
@@ -581,7 +521,10 @@ static bool removeRect(rectT rect, void *item, nodeT **root) {
 					root,
 					tempNode->level);
 			}
+			listNodeT *prev = reInsertList;
 			reInsertList = reInsertList->next;
+			freeNode(prev->node);
+			free(prev);
 		}
 		// Check for redundant root (not leaf, 1 child) and eliminate
 		if ((*root)->count == 1 && (*root)->level > 0) {
@@ -682,12 +625,62 @@ static int search(nodeT *node, rectT rect){
 }
 
 
+
+
+typedef struct RTree {
+	nodeT *root;
+} RTree;
+
+RTree *rtreeNew() {
+	RTree *tr = malloc(sizeof(RTree));
+	assert(tr);
+	memset(tr, 0, sizeof(RTree));
+	return tr;
+}
+
+void rtreeFree(RTree *tr){
+	if (!tr){
+		return;
+	}
+	if (tr->root){
+		freeNode(tr->root);
+	}
+	free(tr);
+}
+
 // Search finds all items in bounding box.
 int rtreeSearch(RTree *tr, double minX, double minY, double maxX, double maxY) {
 	if (!tr->root){
 		return 0;
 	}
 	return search(tr->root, itemRect(minX, minY, maxX, maxY, NULL));
+}
+
+// Remove removes item from rtree
+int rtreeRemove(RTree *tr, double minX, double minY, double maxX, double maxY, void *item) {
+	if (tr->root) {
+		removeRect(itemRect(minX, minY, maxX, maxY, item), item, &(tr->root));
+	}
+	return 1;
+}
+
+// Count return the number of items in rtree.
+int rtreeCount(RTree *tr) {
+	if (!tr || !tr->root){
+		return 0;
+	}
+	return countRec(tr->root, 0);
+}
+
+// Insert inserts item into rtree
+int rtreeInsert(RTree *tr, double minX, double minY, double maxX, double maxY, void *item) {
+	if (!tr->root) {
+		tr->root = malloc(sizeof(nodeT));
+		assert(tr->root);
+		memset(tr->root, 0, sizeof(nodeT));
+	}
+	insertRect(itemRect(minX, minY, maxX, maxY, item), item, &(tr->root), 0);
+	return 1;
 }
 
 
@@ -701,10 +694,10 @@ static double randy() { return randd() * 180.0 - 90.0;}
 int main(){
 	srand(time(NULL)/clock());
 	printf("rtree implementation\n");
-	for(;;){
+	for(int jj=0;jj<100;jj++){
 		RTree *tr = rtreeNew();
 		assert(tr);
-		int n = 1000;
+		int n = 10000;
 		clock_t start = clock();
 		for (int i=0;i<n;i++){
 			double minX = randx();
@@ -724,7 +717,7 @@ int main(){
 
 		rtreeFree(tr);
 	}
-
+	return 0;
 
 	for (;;){
 		RTree *tr = rtreeNew();
