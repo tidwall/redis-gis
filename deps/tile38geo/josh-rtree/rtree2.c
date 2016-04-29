@@ -16,24 +16,23 @@
 // unitSphereVolume3 = 4.188790
 // unitSphereVolume4 = 4.934802
 
-typedef double float64;
 typedef struct branchT branchT;
 typedef struct nodeT nodeT;
 typedef struct rectT rectT;
 typedef struct listNodeT listNodeT;
 typedef struct partitionVarsT partitionVarsT;
 typedef struct RTree RTree;
-typedef struct Item Item;
+//typedef struct Item Item;
 
-struct Item {
-	double minX, minY, maxX, maxY;
-	void *ptr;
-};
+// struct Item {
+// 	double minX, minY, maxX, maxY;
+// 	void *ptr;
+// };
 
 /// Minimal bounding rectangle (n-dimensional)
 struct rectT {
-	float64 min[2]; ///< Min dimensions of bounding box
-	float64 max[2]; ///< Max dimensions of bounding box
+	double min[2]; ///< Min dimensions of bounding box
+	double max[2]; ///< Max dimensions of bounding box
 };
 
 /// May be data or may be another subtree
@@ -71,11 +70,11 @@ struct partitionVarsT {
 	bool    taken[MAX_NODES+1];
 	int     count[2];
 	rectT   cover[2];
-	float64  area[2];
+	double  area[2];
 	branchT branchBuf[MAX_NODES+1];
 	int     branchCount;
 	rectT   coverSplit;
-	float64  coverSplitArea;
+	double  coverSplitArea;
 };
 
 // RTree is an implementation of an rtree
@@ -84,22 +83,22 @@ struct RTree {
 };
 
 
-static inline rectT itemRect(Item item) {
+static inline rectT itemRect(double minX, double minY, double maxX, double maxY, void *ptr) {
 	rectT r;
-	r.min[0] = item.minX;
-	r.min[1] = item.minY;
-	r.max[0] = item.maxX;
-	r.max[1] = item.maxY;
+	r.min[0] = minX;
+	r.min[1] = minY;
+	r.max[0] = maxX;
+	r.max[1] = maxY;
 	return r;
 }
 
-static inline float64 min(float64 a, float64 b) {
+static inline double min(double a, double b) {
 	if (a < b) {
 		return a;
 	}
 	return b;
 }
-static inline float64 max(float64 a, float64 b) {
+static inline double max(double a, double b) {
 	if (a > b) {
 		return a;
 	}
@@ -108,12 +107,12 @@ static inline float64 max(float64 a, float64 b) {
 
 
 
-static bool insertRect(rectT rect, Item item, nodeT **root, int level);
-static bool insertRectRec(rectT rect, Item item, nodeT *node, nodeT **newNode, int level);
+static bool insertRect(rectT rect, void *item, nodeT **root, int level);
+static bool insertRectRec(rectT rect, void *item, nodeT *node, nodeT **newNode, int level);
 static int pickBranch(rectT rect, nodeT *node);
-static float64 rectVolume(rectT rect);
-static float64 rectSphericalVolume(rectT rect);
-static float64 calcRectVolume(rectT rect);
+static double rectVolume(rectT rect);
+static double rectSphericalVolume(rectT rect);
+static double calcRectVolume(rectT rect);
 static rectT combineRect(rectT rectA, rectT rectB);
 static rectT nodeCover(nodeT *node);
 static bool addBranch(branchT *branch, nodeT *node, nodeT **newNode);
@@ -125,12 +124,24 @@ static void pickSeeds(partitionVarsT *parVars);
 static void initParVars(partitionVarsT *parVars, int maxRects, int minFill);
 static void loadNodes(nodeT *nodeA, nodeT *nodeB, partitionVarsT *parVars);
 static int countRec(nodeT *node, int counter);
-static bool removeRect(rectT rect, Item item, nodeT **root);
-static bool removeRectRec(rectT rect, Item item, nodeT *node, listNodeT **listNode);
+static bool removeRect(rectT rect, void *item, nodeT **root);
+static bool removeRectRec(rectT rect, void *item, nodeT *node, listNodeT **listNode);
 static void reInsert(nodeT *node, listNodeT **listNode);
 static bool overlap(rectT rectA, rectT rectB);
 static void disconnectBranch(nodeT *node, int index);
 
+
+static void freeNode(nodeT *node){
+	if (!node){
+		return;
+	}
+	for (int i=0;i<node->count;i++){
+		if (node->branch[i].child){
+			freeNode(node->branch[i].child);
+		}
+	}
+	free(node);
+}
 
 // New creates a new RTree
 RTree *rtreeNew() {
@@ -144,6 +155,9 @@ void rtreeFree(RTree *tr){
 	if (!tr){
 		return;
 	}
+	if (tr->root){
+		freeNode(tr->root);
+	}
 	free(tr);
 }
 
@@ -154,8 +168,7 @@ int rtreeInsert(RTree *tr, double minX, double minY, double maxX, double maxY, v
 		assert(tr->root);
 		memset(tr->root, 0, sizeof(nodeT));
 	}
-	Item m = {minX, minY, maxX, maxY, item};
-	insertRect(itemRect(m), m, &(tr->root), 0);
+	insertRect(itemRect(minX, minY, maxX, maxY, item), item, &(tr->root), 0);
 	return 1;
 }
 
@@ -165,7 +178,7 @@ int rtreeInsert(RTree *tr, double minX, double minY, double maxX, double maxY, v
 // The level argument specifies the number of steps up from the leaf
 // level to insert; e.g. a data rectangle goes in at level = 0.
 // InsertRect2 does the recursion.
-static bool insertRect(rectT rect, Item item, nodeT **root, int level) {
+static bool insertRect(rectT rect, void *item, nodeT **root, int level) {
 	nodeT *newRoot = NULL;
 	nodeT *newNode = NULL;
 	branchT branch;
@@ -209,7 +222,7 @@ static bool insertRect(rectT rect, Item item, nodeT **root, int level) {
 // new_node to point to the new node.  Old node updated to become one of two.
 // The level argument specifies the number of steps up from the leaf
 // level to insert; e.g. a data rectangle goes in at level = 0.
-static bool insertRectRec(rectT rect, Item item, nodeT *node, nodeT **newNode, int level) {
+static bool insertRectRec(rectT rect, void *item, nodeT *node, nodeT **newNode, int level) {
 	int index = 0;
 	branchT branch;
 	memset(&branch, 0, sizeof(branchT));
@@ -235,7 +248,7 @@ static bool insertRectRec(rectT rect, Item item, nodeT *node, nodeT **newNode, i
 		return addBranch(&branch, node, newNode);
 	} else if (node->level == level) { // Have reached level for insertion. Add rect, split if necessary
 		branch.rect = rect;
-		branch.item = item.ptr;
+		branch.item = item;
 		// Child field of leaves contains id of data record
 		return addBranch(&branch, node, newNode);
 	}
@@ -251,10 +264,10 @@ static bool insertRectRec(rectT rect, Item item, nodeT *node, nodeT **newNode, i
 // the best resolution when searching.
 static int pickBranch(rectT rect, nodeT *node) {
 	bool firstTime = true;
-	float64 increase = 0;
-	float64 bestIncr = -1;
-	float64 area = 0;
-	float64 bestArea = 0;
+	double increase = 0;
+	double bestIncr = -1;
+	double area = 0;
+	double bestArea = 0;
 	int best = 0;
 	rectT tempRect;
 	memset(&tempRect, 0, sizeof(rectT));
@@ -279,8 +292,8 @@ static int pickBranch(rectT rect, nodeT *node) {
 
 
 // Calculate the n-dimensional volume of a rectangle
-static float64 rectVolume(rectT rect) {
-	float64 volume = 1;
+static double rectVolume(rectT rect) {
+	double volume = 1;
 	for (int index = 0; index < 2; index++) {
 		volume *= rect.max[index] - rect.min[index];
 	}
@@ -288,11 +301,11 @@ static float64 rectVolume(rectT rect) {
 }
 
 // The exact volume of the bounding sphere for the given rectT
-static float64 rectSphericalVolume(rectT rect) {
-	float64 sumOfSquares = 0;
-	float64 radius = 0;
+static double rectSphericalVolume(rectT rect) {
+	double sumOfSquares = 0;
+	double radius = 0;
 	for (int index = 0; index < 2; index++) {
-		float64 halfExtent = (rect.max[index] - rect.min[index]) * 0.5;
+		double halfExtent = (rect.max[index] - rect.min[index]) * 0.5;
 		sumOfSquares += halfExtent * halfExtent;
 	}
 	radius = sqrt(sumOfSquares);
@@ -300,7 +313,7 @@ static float64 rectSphericalVolume(rectT rect) {
 }
 
 // Use one of the methods to calculate retangle volume
-static float64 calcRectVolume(rectT rect) {
+static double calcRectVolume(rectT rect) {
 	if (USE_SPHERICAL_VOLUME) {
 		return rectSphericalVolume(rect); // Slower but helps certain merge cases
 	}
@@ -405,7 +418,7 @@ static void getBranches(nodeT *node, branchT *branch, partitionVarsT *parVars) {
 // fill requirement) then other group gets the rest.
 // These last are the ones that can go in either group most easily.
 static void choosePartition(partitionVarsT *parVars, int minFill) {
-	float64 biggestDiff = 0;
+	double biggestDiff = 0;
 	int group = 0;
 	int chosen = 0;
 	int betterGroup = 0;
@@ -420,9 +433,9 @@ static void choosePartition(partitionVarsT *parVars, int minFill) {
 				rectT curRect = parVars->branchBuf[index].rect;
 				rectT rect0 = combineRect(curRect, parVars->cover[0]);
 				rectT rect1 = combineRect(curRect, parVars->cover[1]);
-				float64 growth0 = calcRectVolume(rect0) - parVars->area[0];
-				float64 growth1 = calcRectVolume(rect1) - parVars->area[1];
-				float64 diff = growth1 - growth0;
+				double growth0 = calcRectVolume(rect0) - parVars->area[0];
+				double growth1 = calcRectVolume(rect1) - parVars->area[1];
+				double diff = growth1 - growth0;
 				if (diff >= 0) {
 					group = 0;
 				} else {
@@ -485,9 +498,9 @@ static void initParVars(partitionVarsT *parVars, int maxRects, int minFill) {
 static void pickSeeds(partitionVarsT *parVars) {
 	int seed0 = 0;
 	int seed1 = 0;
-	float64 worst = 0;
-	float64 waste = 0;
-	float64 area[MAX_NODES+1];
+	double worst = 0;
+	double waste = 0;
+	double area[MAX_NODES+1];
 	memset(&area, 0, sizeof(area));
 	for (int index = 0; index < parVars->total; index++) {
 		area[index] = calcRectVolume(parVars->branchBuf[index].rect);
@@ -542,28 +555,10 @@ static int countRec(nodeT *node, int counter) {
 	return counter;
 }
 
-// // Search finds all items in bounding box.
-// static void rtreeSearch(RTree *tr, minX, minY, maxX, maxY float64, iterator func(item Item) bool) {
-// 	if iterator == nil {
-// 		return
-// 	}
-// 	rect := rectT{
-// 		min: [2]float64{minX, minY},
-// 		max: [2]float64{maxX, maxY},
-// 	}
-// 	// NOTE: May want to return search result another way, perhaps returning the number of found elements here.
-// 	if tr.root == nil {
-// 		tr.root = &nodeT{}
-// 	}
-// 	search(tr.root, rect, iterator)
-// }
-
-
 // Remove removes item from rtree
 int rtreeRemove(RTree *tr, double minX, double minY, double maxX, double maxY, void *item) {
 	if (tr->root) {
-		Item m = {minX, minY, maxX, maxY, item};
-		removeRect(itemRect(m), m, &(tr->root));
+		removeRect(itemRect(minX, minY, maxX, maxY, item), item, &(tr->root));
 	}
 	return 1;
 }
@@ -572,7 +567,7 @@ int rtreeRemove(RTree *tr, double minX, double minY, double maxX, double maxY, v
 // Pass in a pointer to a rectT, the tid of the record, ptr to ptr to root node.
 // Returns 1 if record not found, 0 if success.
 // RemoveRect provides for eliminating the root.
-static bool removeRect(rectT rect, Item item, nodeT **root) {
+static bool removeRect(rectT rect, void *item, nodeT **root) {
 	nodeT *tempNode = NULL;
 	listNodeT *reInsertList = NULL;
 	if (!removeRectRec(rect, item, *root, &reInsertList)) {
@@ -602,7 +597,7 @@ static bool removeRect(rectT rect, Item item, nodeT **root) {
 // Called by RemoveRect.  Descends tree recursively,
 // merges branches on the way back up.
 // Returns 1 if record not found, 0 if success.
-static bool removeRectRec(rectT rect, Item item, nodeT *node, listNodeT **listNode) {
+static bool removeRectRec(rectT rect, void *item, nodeT *node, listNodeT **listNode) {
 	if (node == NULL) {
 		return true;
 	}
@@ -626,7 +621,7 @@ static bool removeRectRec(rectT rect, Item item, nodeT *node, listNodeT **listNo
 	}
 	// A leaf node
 	for (int index = 0; index < node->count; index++) {
-		if (node->branch[index].item == item.ptr) {
+		if (node->branch[index].item == item) {
 			disconnectBranch(node, index); // Must return after this call as count has changed
 			return false;
 		}
@@ -666,6 +661,37 @@ static void disconnectBranch(nodeT *node, int index) {
 }
 
 
+static int search(nodeT *node, rectT rect){
+	int counter = 0;
+	if (node) {
+		if (node->level > 0) { // This is an internal node in the tree
+			for (int index = 0; index < node->count; index++) {
+				if (overlap(rect, node->branch[index].rect)) {
+					counter += search(node->branch[index].child, rect);
+				}
+			}
+		} else { // This is a leaf node
+			for (int index = 0; index < node->count; index++) {
+				if (overlap(rect, node->branch[index].rect)) {
+					counter++;
+				}
+			}
+		}
+	}
+	return counter;
+}
+
+
+// Search finds all items in bounding box.
+int rtreeSearch(RTree *tr, double minX, double minY, double maxX, double maxY) {
+	if (!tr->root){
+		return 0;
+	}
+	return search(tr->root, itemRect(minX, minY, maxX, maxY, NULL));
+}
+
+
+
 
 
 static double randd() { return ((rand()%RAND_MAX) / (double)RAND_MAX);}
@@ -673,32 +699,63 @@ static double randx() { return randd() * 360.0 - 180.0;}
 static double randy() { return randd() * 180.0 - 90.0;}
 
 int main(){
+	srand(time(NULL)/clock());
 	printf("rtree implementation\n");
+	for(;;){
+		RTree *tr = rtreeNew();
+		assert(tr);
+		int n = 1000;
+		clock_t start = clock();
+		for (int i=0;i<n;i++){
+			double minX = randx();
+			double minY = randy();
+			double maxX = minX+(randd()*10+0.0001);
+			double maxY = minY+(randd()*10+0.0001);
+			assert(rtreeInsert(tr, minX, minY, maxX, maxY, (void*)(long)i));
+		}
+		// double elapsed = (double)(clock()-start)/(double)CLOCKS_PER_SEC;
+		// printf("inserted %d items in %.2f secs, %.0f ops/s\n", n, elapsed, (double)n/elapsed);
+		assert(rtreeCount(tr)==n);
+
+		for (int i=0;i<n;i++){
+			assert(rtreeRemove(tr, -180, -90, 180+11, 90+11, (void*)(long)i));
+		}
+
+
+		rtreeFree(tr);
+	}
+
+
 	for (;;){
 		RTree *tr = rtreeNew();
 		assert(tr);
 
-		double minX1111,minY1111,maxX1111,maxY1111;
-
+		int n = 1000000;
 		clock_t start = clock();
-		for (int i=0;i<100000;i++){
-			double minX = randd()*10;
-			double minY = randd()*10;
-			double maxX = minX+(randd()*5);
-			double maxY = minY+(randd()*5);
-			if (i == 1111){
-				minX1111 = minX;
-				minY1111 = minY;
-				maxX1111 = maxX;
-				maxY1111 = maxY;
-			}
+		for (int i=0;i<n;i++){
+			double minX = randx();
+			double minY = randy();
+			double maxX = minX+(randd()*10+0.0001);
+			double maxY = minY+(randd()*10+0.0001);
 			assert(rtreeInsert(tr, minX, minY, maxX, maxY, (void*)(long)i));
 		}
-		printf("%f\n", (double)(clock()-start)/(double)CLOCKS_PER_SEC);
-		printf("%d\n", rtreeCount(tr));
-		assert(rtreeRemove(tr, minX1111, minY1111, maxX1111, maxY1111, (void*)(long)1111));
-		printf("%d\n", rtreeCount(tr));
-		//rtreeInsert(tr, 5, 5, 10, 10, (void*)(long)1);
+		double elapsed = (double)(clock()-start)/(double)CLOCKS_PER_SEC;
+		printf("inserted %d items in %.2f secs, %.0f ops/s\n", n, elapsed, (double)n/elapsed);
+		assert(rtreeCount(tr)==n);
+
+
+		double rt = 0;
+		n = 100000;
+		start = clock();
+		for (int i=0;i<n;i++){
+			double minX = randx();
+			double minY = randy();
+			double maxX = minX+(randd()*10+0.0001);
+			double maxY = minY+(randd()*10+0.0001);
+			rt += (double)rtreeSearch(tr, 0, 0, 1, 1);
+		}
+		elapsed = ((double)(clock()-start) / (double)CLOCKS_PER_SEC);
+		printf("searched %d queries in %.2f secs, %.0f ops/s (~%.0f items)\n", n, elapsed, (double)n/elapsed, rt/(double)n);
 
 		rtreeFree(tr);
 		break;
