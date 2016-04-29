@@ -27,26 +27,23 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef QTREE_H_
-#define QTREE_H_
+#ifndef RTREE_H_
+#define RTREE_H_
 
 #if defined(__cplusplus)
 extern "C" {
 #endif
 
-typedef struct qtree qtree;
-typedef struct qtreeIterator qtreeIterator;
+typedef struct rtree rtree;
 
-qtree *qtreeNew(double minX, double minY, double maxX, double maxY);
-void qtreeFree(qtree *t);
-int qtreeInsert(qtree *t, double x, double y, void *item);
-int qtreeCount(qtree *t);
-int qtreeRemove(qtree *t, double x, double y, void *item);
-qtreeIterator *qtreeNewIterator(qtree *t, double minX, double minY, double maxX, double maxY);
-void qtreeFreeIterator(qtreeIterator *qi);
-int qtreeIteratorNext(qtreeIterator *qi);
+rtree *rtreeNew();
+void rtreeFree(rtree *tr);
+int rtreeSearch(rtree *tr, double minX, double minY, double maxX, double maxY);
+int rtreeRemove(rtree *tr, double minX, double minY, double maxX, double maxY, void *item);
+int rtreeCount(rtree *tr);
+int rtreeInsert(rtree *tr, double minX, double minY, double maxX, double maxY, void *item);
 
 #if defined(__cplusplus)
 }
 #endif
-#endif /* TEST_H_ */
+#endif /* RTREE_H_ */

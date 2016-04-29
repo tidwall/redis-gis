@@ -38,6 +38,7 @@ int test_Geom();
 int test_GeomZ();
 int test_GeomZM();
 int test_QTreeInsert();
+int test_RTreeInsert();
 
 typedef struct test{
 	char *name;
@@ -49,6 +50,7 @@ test tests[] = {
 	{ "geomZ", test_GeomZ },
 	{ "geomZM", test_GeomZM },
 	{ "qtreeInsert", test_QTreeInsert },
+	{ "rtreeInsert", test_RTreeInsert },
 };
 
 static int abort_handled = 0;

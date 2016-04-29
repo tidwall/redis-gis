@@ -1,3 +1,46 @@
+/* Package rtree - An r-tree implementation.
+ *
+ * This file is derived from the work done by Toni Gutman. R-Trees: A Dynamic Index Structure for
+ * Spatial Searching, Proc. 1984 ACM SIGMOD International Conference on Management of Data, pp.
+ * 47-57. 
+ *
+ * The original C code can be found at "http://www.superliminal.com/sources/sources.htm".
+ *
+ * And the website carries this message: "Here are a few useful bits of free source code. You're
+ * completely free to use them for any purpose whatsoever. All I ask is that if you find one to
+ * be particularly valuable, then consider sending feedback. Please send bugs and suggestions too.
+ * Enjoy"
+ *
+ * -------
+ *
+ * Copyright (c) 2016, Josh Baker <joshbaker77@gmail.com>.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ *  * Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
+ *  * Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *  * Neither the name of Redis nor the names of its contributors may be used
+ *    to endorse or promote products derived from this software without
+ *    specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
+ * THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -5,7 +48,9 @@
 #include <assert.h>
 #include <time.h>
 
-#define NUM_DIMS             2
+#ifndef NUM_DIMS
+#	define NUM_DIMS          2
+#endif
 #define MAX_NODES            16
 #define MIN_NODES            (MAX_NODES/2)
 #define USE_SPHERICAL_VOLUME 1
@@ -18,7 +63,6 @@
 #else
 #	error invalid NUM_DIMS only 2,3,4 allowed
 #endif
-
 
 typedef struct branchT branchT;
 typedef struct nodeT nodeT;
@@ -608,131 +652,4 @@ static int removeRect(rectT rect, void *item, nodeT **root) {
 		return 0;
 	}
 	return 1;
-}
-
-typedef struct rtree {
-	nodeT *root;
-} rtree;
-
-rtree *rtreeNew() {
-	rtree *tr = malloc(sizeof(rtree));
-	memset(tr, 0, sizeof(rtree));
-	return tr;
-}
-
-void rtreeFree(rtree *tr){
-	if (!tr){
-		return;
-	}
-	if (tr->root){
-		freeNode(tr->root);
-	}
-	free(tr);
-}
-
-// Search finds all items in bounding box.
-int rtreeSearch(rtree *tr, double minX, double minY, double maxX, double maxY) {
-	if (!tr->root){
-		return 0;
-	}
-	return search(tr->root, itemRect(minX, minY, maxX, maxY, NULL));
-}
-
-// Remove removes item from rtree
-int rtreeRemove(rtree *tr, double minX, double minY, double maxX, double maxY, void *item) {
-	if (tr->root) {
-		removeRect(itemRect(minX, minY, maxX, maxY, item), item, &(tr->root));
-	}
-	return 1;
-}
-
-// Count return the number of items in rtree.
-int rtreeCount(rtree *tr) {
-	if (!tr || !tr->root){
-		return 0;
-	}
-	return countRec(tr->root, 0);
-}
-
-// Insert inserts item into rtree
-int rtreeInsert(rtree *tr, double minX, double minY, double maxX, double maxY, void *item) {
-	if (!tr->root) {
-		tr->root = malloc(sizeof(nodeT));
-		memset(tr->root, 0, sizeof(nodeT));
-	}
-	insertRect(itemRect(minX, minY, maxX, maxY, item), item, &(tr->root), 0);
-	return 1;
-}
-
-
-
-
-
-static double randd() { return ((rand()%RAND_MAX) / (double)RAND_MAX);}
-static double randx() { return randd() * 360.0 - 180.0;}
-static double randy() { return randd() * 180.0 - 90.0;}
-
-int main(){
-	srand(time(NULL)/clock());
-	printf("rtree implementation\n");
-	for(int jj=0;jj<100;jj++){
-		rtree *tr = rtreeNew();
-		assert(tr);
-		int n = 10000;
-		clock_t start = clock();
-		for (int i=0;i<n;i++){
-			double minX = randx();
-			double minY = randy();
-			double maxX = minX+(randd()*10+0.0001);
-			double maxY = minY+(randd()*10+0.0001);
-			assert(rtreeInsert(tr, minX, minY, maxX, maxY, (void*)(long)i));
-		}
-		// double elapsed = (double)(clock()-start)/(double)CLOCKS_PER_SEC;
-		// printf("inserted %d items in %.2f secs, %.0f ops/s\n", n, elapsed, (double)n/elapsed);
-		assert(rtreeCount(tr)==n);
-
-		for (int i=0;i<n;i++){
-			assert(rtreeRemove(tr, -180, -90, 180+11, 90+11, (void*)(long)i));
-		}
-
-
-		rtreeFree(tr);
-	}
-	return 0;
-
-	for (;;){
-		rtree *tr = rtreeNew();
-		assert(tr);
-
-		int n = 1000000;
-		clock_t start = clock();
-		for (int i=0;i<n;i++){
-			double minX = randx();
-			double minY = randy();
-			double maxX = minX+(randd()*10+0.0001);
-			double maxY = minY+(randd()*10+0.0001);
-			assert(rtreeInsert(tr, minX, minY, maxX, maxY, (void*)(long)i));
-		}
-		double elapsed = (double)(clock()-start)/(double)CLOCKS_PER_SEC;
-		printf("inserted %d items in %.2f secs, %.0f ops/s\n", n, elapsed, (double)n/elapsed);
-		assert(rtreeCount(tr)==n);
-
-
-		double rt = 0;
-		n = 100000;
-		start = clock();
-		for (int i=0;i<n;i++){
-			double minX = randx();
-			double minY = randy();
-			double maxX = minX+(randd()*10+0.0001);
-			double maxY = minY+(randd()*10+0.0001);
-			rt += (double)rtreeSearch(tr, 0, 0, 1, 1);
-		}
-		elapsed = ((double)(clock()-start) / (double)CLOCKS_PER_SEC);
-		printf("searched %d queries in %.2f secs, %.0f ops/s (~%.0f items)\n", n, elapsed, (double)n/elapsed, rt/(double)n);
-
-		rtreeFree(tr);
-		break;
-	}
-	return 0;
 }
