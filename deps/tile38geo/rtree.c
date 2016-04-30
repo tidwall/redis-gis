@@ -61,13 +61,10 @@ void rtreeFree(rtree *tr){
 
 // Remove removes item from rtree
 int rtreeRemove(rtree *tr, double minX, double minY, double maxX, double maxY, void *item) {
-	if (!tr){
-		return 0;
+	if (tr && tr->root){
+		return removeRect(makeRect(minX, minY, maxX, maxY), item, &(tr->root))?0:1;
 	}
-	if (tr->root) {
-		removeRect(makeRect(minX, minY, maxX, maxY), item, &(tr->root));
-	}
-	return 1;
+	return 0;
 }
 
 // Count return the number of items in rtree.

@@ -52,7 +52,7 @@
 #   define USE_SPHERICAL_VOLUME 1
 #endif
 #ifndef MAX_NODES
-#   define MAX_NODES            16
+#   define MAX_NODES 16
 #endif
 
 #include <stdio.h>
@@ -63,11 +63,11 @@
 #define MIN_NODES (MAX_NODES/2)
 
 #if NUM_DIMS == 2
-#   define UNIT_SPHERE_VOLUME   3.141593
+#   define UNIT_SPHERE_VOLUME 3.141593
 #elif NUM_DIMS == 3
-#   define UNIT_SPHERE_VOLUME   4.188790
+#   define UNIT_SPHERE_VOLUME 4.188790
 #elif NUM_DIMS == 4
-#   define UNIT_SPHERE_VOLUME   4.934802
+#   define UNIT_SPHERE_VOLUME 4.934802
 #else
 #   error invalid NUM_DIMS only 2,3,4 allowed
 #endif
@@ -80,35 +80,28 @@ typedef struct partitionVarsT partitionVarsT;
 typedef struct stackT stackT;
 typedef struct iteratorT iteratorT;
 
-/// Minimal bounding rectangle (n-dimensional)
 struct rectT {
-    NUMBER min[NUM_DIMS]; ///< Min dimensions of bounding box
-    NUMBER max[NUM_DIMS]; ///< Max dimensions of bounding box
+    NUMBER min[NUM_DIMS];
+    NUMBER max[NUM_DIMS];
 };
 
-/// May be data or may be another subtree
-/// The parents level determines this.
-/// If the parents level is 0, then this is data
 struct branchT {
-    rectT rect;    ///< Bounds
-    void  *item;   ///< Data ID or Ptr
-    nodeT *child;  ///< Child node
+    rectT rect;
+    void  *item;
+    nodeT *child;
 };
 
-/// nodeT for each branch level
 struct nodeT {
-    int     count;               ///< Count
-    int     level;               ///< Leaf is zero, others positive
-    branchT branch[MAX_NODES];   ///< branchT
+    int     count;
+    int     level;
+    branchT branch[MAX_NODES];
 };
 
-/// A link list of nodes for reinsertion after a delete operation
 struct listNodeT {
-    listNodeT *next; ///< Next in list
-    nodeT     *node; ///< nodeT
+    listNodeT *next;
+    nodeT     *node;
 };
 
-/// Variables for finding a split partition
 struct partitionVarsT {
     int     partition[MAX_NODES+1];
     int     total;
@@ -121,20 +114,6 @@ struct partitionVarsT {
     int     branchCount;
     rectT   coverSplit;
     NUMBER  coverSplitArea;
-};
-
-struct stackT {
-    nodeT *node;
-    int index;
-};
-
-struct iteratorT {
-    int len;
-    stackT stack[64];
-    rectT rect;
-
-    rectT resRect;
-    void *resItem;
 };
 
 static int addBranch(branchT *branch, nodeT *node, nodeT **newNode);
@@ -213,7 +192,6 @@ static inline NUMBER max(NUMBER a, NUMBER b) {
     return b;
 }
 
-// Decide whether two rectangles overlap.
 static inline int overlap(rectT rectA, rectT rectB) {
     for (int index = 0; index < NUM_DIMS; index++) {
         if (rectA.min[index] > rectB.max[index] ||
@@ -224,9 +202,7 @@ static inline int overlap(rectT rectA, rectT rectB) {
     return 1;
 }
 
-// Add a node to the reinsertion list.  All its branches will later
-// be reinserted into the index structure.
-static void reInsert(nodeT *node, listNodeT **listNode) {
+static void reinsert(nodeT *node, listNodeT **listNode) {
     listNodeT *nlistNode = malloc(sizeof(listNodeT));
     memset(nlistNode, 0, sizeof(listNodeT));
     nlistNode->node = node;
@@ -234,15 +210,11 @@ static void reInsert(nodeT *node, listNodeT **listNode) {
     *listNode = nlistNode;
 }
 
-// Disconnect a dependent node.
-// Caller must return (or stop using iteration index) after this as count has changed
 static void disconnectBranch(nodeT *node, int index) {
-    // Remove element by swapping with the last element to prevent gaps in array
     node->branch[index] = node->branch[node->count-1];
     node->count--;
 }
 
-// Combine two rectangles into larger one containing both
 static rectT combineRect(rectT rectA, rectT rectB) {
     rectT newRect;
     memset(&newRect, 0, sizeof(rectT));
@@ -253,7 +225,6 @@ static rectT combineRect(rectT rectA, rectT rectB) {
     return newRect;
 }
 
-// Find the smallest rectangle that includes all rectangles in branches of a node.
 static rectT nodeCover(nodeT *node) {
     int firstTime = 1;
     rectT rect;
@@ -269,7 +240,6 @@ static rectT nodeCover(nodeT *node) {
     return rect;
 }
 
-// Calculate the n-dimensional volume of a rectangle
 static NUMBER rectVolume(rectT rect) {
     NUMBER volume = 1;
     for (int index = 0; index < 2; index++) {
@@ -278,7 +248,6 @@ static NUMBER rectVolume(rectT rect) {
     return volume;
 }
 
-// The exact volume of the bounding sphere for the given rectT
 static NUMBER rectSphericalVolume(rectT rect) {
     NUMBER sumOfSquares = 0;
     NUMBER radius = 0;
@@ -298,23 +267,19 @@ static NUMBER rectSphericalVolume(rectT rect) {
     }
 }
 
-// Use one of the methods to calculate retangle volume
 static NUMBER calcRectVolume(rectT rect) {
     if (USE_SPHERICAL_VOLUME) {
-        return rectSphericalVolume(rect); // Slower but helps certain merge cases
+        return rectSphericalVolume(rect);
     }
-    return rectVolume(rect); // Faster but can cause poor merges
+    return rectVolume(rect);
 }
 
-// Load branch buffer with branches from full node plus the extra branch.
 static void getBranches(nodeT *node, branchT *branch, partitionVarsT *parVars) {
-    // Load the branch buffer
     for (int index = 0; index < MAX_NODES; index++) {
         parVars->branchBuf[index] = node->branch[index];
     }
     parVars->branchBuf[MAX_NODES] = *branch;
     parVars->branchCount = MAX_NODES + 1;
-    // Calculate rect containing all in the set
     parVars->coverSplit = parVars->branchBuf[0].rect;
     for (int index = 1; index < MAX_NODES+1; index++) {
         parVars->coverSplit = combineRect(parVars->coverSplit, parVars->branchBuf[index].rect);
@@ -324,7 +289,6 @@ static void getBranches(nodeT *node, branchT *branch, partitionVarsT *parVars) {
     node->level = -1;
 }
 
-// Initialize a partitionVarsT structure.
 static void initParVars(partitionVarsT *parVars, int maxRects, int minFill) {
     parVars->count[1] = 0;
     parVars->count[0] = parVars->count[1];
@@ -338,7 +302,6 @@ static void initParVars(partitionVarsT *parVars, int maxRects, int minFill) {
     }
 }
 
-// Put a branch in one of the groups.
 static void classify(int index, int group, partitionVarsT *parVars) {
     parVars->partition[index] = group;
     parVars->taken[index] = 1;
@@ -378,17 +341,6 @@ static void pickSeeds(partitionVarsT *parVars) {
     classify(seed1, 1, parVars);
 }
 
-// Method #0 for choosing a partition:
-// As the seeds for the two groups, pick the two rects that would waste the
-// most area if covered by a single rectangle, i.e. evidently the worst pair
-// to have in the same group.
-// Of the remaining, one at a time is chosen to be put in one of the two groups.
-// The one chosen is the one with the greatest difference in area expansion
-// depending on which group - the rect most strongly attracted to one group
-// and repelled from the other.
-// If one group gets too full (more would force other group to violate min
-// fill requirement) then other group gets the rest.
-// These last are the ones that can go in either group most easily.
 static void choosePartition(partitionVarsT *parVars, int minFill) {
     NUMBER biggestDiff = 0;
     int group = 0;
@@ -426,7 +378,6 @@ static void choosePartition(partitionVarsT *parVars, int minFill) {
         }
         classify(chosen, betterGroup, parVars);
     }
-    // If one group too full, put remaining rects in the other
     if ((parVars->count[0] + parVars->count[1]) < parVars->total) {
         if (parVars->count[0] >= parVars->total-parVars->minFill) {
             group = 1;
@@ -441,7 +392,6 @@ static void choosePartition(partitionVarsT *parVars, int minFill) {
     }
 }
 
-// Copy branches from the buffer into two nodes according to the partition.
 static void loadNodes(nodeT *nodeA, nodeT *nodeB, partitionVarsT *parVars) {
     for (int index = 0; index < parVars->total; index++) {
         if (parVars->partition[index] == 0) {
@@ -452,22 +402,14 @@ static void loadNodes(nodeT *nodeA, nodeT *nodeB, partitionVarsT *parVars) {
     }
 }
 
-// Split a node.
-// Divides the nodes branches and the extra one between two nodes.
-// Old node is one of the new ones, and one really new one is created.
-// Tries more than one method for choosing a partition, uses best result.
 static void splitNode(nodeT *node, branchT *branch, nodeT **newNode) {
-    // Could just use local here, but member or external is faster since it is reused
     partitionVarsT localVars;
     memset(&localVars, 0, sizeof(partitionVarsT));
     partitionVarsT *parVars = &localVars;
     int level = 0;
-    // Load all the branches into a buffer, initialize old node
     level = node->level;
     getBranches(node, branch, parVars);
-    // Find partition
     choosePartition(parVars, MIN_NODES);
-    // Put branches from buffer into 2 nodes according to chosen partition
     *newNode = malloc(sizeof(nodeT));
     memset(*newNode, 0, sizeof(nodeT));
     node->level = level;
@@ -475,12 +417,8 @@ static void splitNode(nodeT *node, branchT *branch, nodeT **newNode) {
     loadNodes(node, *newNode, parVars);
 }
 
-// Add a branch to a node.  Split the node if necessary.
-// Returns 0 if node not split.  Old node updated.
-// Returns 1 if node split, sets *new_node to address of new node.
-// Old node updated, becomes one of two.
 static int addBranch(branchT *branch, nodeT *node, nodeT **newNode) {
-    if (node->count < MAX_NODES) { // Split won't be necessary
+    if (node->count < MAX_NODES) {
         node->branch[node->count] = *branch;
         node->count++;
         return 0;
@@ -501,60 +439,39 @@ static void freeNode(nodeT *node){
     free(node);
 }
 
-// Inserts a new data rectangle into the index structure.
-// Recursively descends tree, propagates splits back up.
-// Returns 0 if node was not split.  Old node updated.
-// If node was split, returns 1 and sets the pointer pointed to by
-// new_node to point to the new node.  Old node updated to become one of two.
-// The level argument specifies the number of steps up from the leaf
-// level to insert; e.g. a data rectangle goes in at level = 0.
 static int insertRectRec(rectT rect, void *item, nodeT *node, nodeT **newNode, int level) {
     int index = 0;
     branchT branch;
     memset(&branch, 0, sizeof(branchT));
     nodeT *otherNode = NULL;
-    // Still above level for insertion, go down tree recursively
     if (node == NULL) {
         return 0;
     }
     if (node->level > level) {
         index = pickBranch(rect, node);
         if (!insertRectRec(rect, item, node->branch[index].child, &otherNode, level)) {
-            // Child was not split
             node->branch[index].rect = combineRect(rect, node->branch[index].rect);
             return 0;
-        } // Child was split
+        }
         node->branch[index].rect = nodeCover(node->branch[index].child);
         branch.child = otherNode;
-        // if branch.child == nil {
-        //  println(">> child assigned is nil")
-        // }
         branch.rect = nodeCover(otherNode);
         return addBranch(&branch, node, newNode);
-    } else if (node->level == level) { // Have reached level for insertion. Add rect, split if necessary
+    } else if (node->level == level) {
         branch.rect = rect;
         branch.item = item;
-        // Child field of leaves contains id of data record
         return addBranch(&branch, node, newNode);
     }
-    // Should never occur
     return 0;
 }
 
-// Insert a data rectangle into an index structure.
-// InsertRect provides for splitting the root;
-// returns 1 if root was split, 0 if it was not.
-// The level argument specifies the number of steps up from the leaf
-// level to insert; e.g. a data rectangle goes in at level = 0.
-// InsertRect2 does the recursion.
 static int insertRect(rectT rect, void *item, nodeT **root, int level) {
     nodeT *newRoot = NULL;
     nodeT *newNode = NULL;
     branchT branch;
     memset(&branch, 0, sizeof(branchT));
-    
-    if (insertRectRec(rect, item, *root, &newNode, level)) { // Root split
-        newRoot = malloc(sizeof(nodeT)); // Grow tree taller and new root
+    if (insertRectRec(rect, item, *root, &newNode, level)) {
+        newRoot = malloc(sizeof(nodeT));
         memset(newRoot, 0, sizeof(nodeT));
         newRoot->level = (*root)->level + 1;
         branch.rect = nodeCover(*root);
@@ -569,11 +486,6 @@ static int insertRect(rectT rect, void *item, nodeT **root, int level) {
     return 0;
 }
 
-// Pick a branch.  Pick the one that will need the smallest increase
-// in area to accommodate the new rectangle.  This will result in the
-// least total area for the covering rectangles in the current node.
-// In case of a tie, pick the one which was smaller before, to get
-// the best resolution when searching.
 static int pickBranch(rectT rect, nodeT *node) {
     int firstTime = 1;
     NUMBER increase = 0;
@@ -603,76 +515,62 @@ static int pickBranch(rectT rect, nodeT *node) {
 }
 
 static int countRec(nodeT *node, int counter) {
-    if (node->level > 0) { // not a leaf node
+    if (node->level > 0) {
         for (int index = 0; index < node->count; index++) {
             counter = countRec(node->branch[index].child, counter);
         }
-    } else { // A leaf node
+    } else {
         counter += node->count;
     }
     return counter;
 }
 
-// Delete a rectangle from non-root part of an index structure.
-// Called by RemoveRect.  Descends tree recursively,
-// merges branches on the way back up.
-// Returns 1 if record not found, 0 if success.
 static int removeRectRec(rectT rect, void *item, nodeT *node, listNodeT **listNode) {
     if (node == NULL) {
         return 1;
     }
-    if (node->level > 0) { // not a leaf node
+    if (node->level > 0) { 
         for (int index = 0; index < node->count; index++) {
             if (overlap(rect, node->branch[index].rect)) {
                 if (!removeRectRec(rect, item, node->branch[index].child, listNode)) {
                     if (node->branch[index].child->count >= MIN_NODES) {
-                        // child removed, just resize parent rect
                         node->branch[index].rect = nodeCover(node->branch[index].child);
                     } else {
-                        // child removed, not enough entries in node, eliminate node
-                        reInsert(node->branch[index].child, listNode);
-                        disconnectBranch(node, index); // Must return after this call as count has changed
+                        reinsert(node->branch[index].child, listNode);
+                        disconnectBranch(node, index); 
                     }
                     return 0;
                 }
             }
         }
-        return 1;
-    }
-    // A leaf node
-    for (int index = 0; index < node->count; index++) {
-        if (node->branch[index].item == item) {
-            disconnectBranch(node, index); // Must return after this call as count has changed
-            return 0;
+    } else {
+        for (int index = 0; index < node->count; index++) { 
+            if (node->branch[index].item == item) {
+                disconnectBranch(node, index);
+                return 0;
+            }
         }
     }
     return 1;
 }
 
-// Delete a data rectangle from an index structure.
-// Pass in a pointer to a rectT, the tid of the record, ptr to ptr to root node.
-// Returns 1 if record not found, 0 if success.
-// RemoveRect provides for eliminating the root.
 static int removeRect(rectT rect, void *item, nodeT **root) {
     nodeT *tempNode = NULL;
-    listNodeT *reInsertList = NULL;
-    if (!removeRectRec(rect, item, *root, &reInsertList)) {
-        // Found and deleted a data item
-        // Reinsert any branches from eliminated nodes
-        while (reInsertList != NULL) {
-            tempNode = reInsertList->node;
+    listNodeT *reinsertList = NULL;
+    if (!removeRectRec(rect, item, *root, &reinsertList)) {
+        while (reinsertList != NULL) {
+            tempNode = reinsertList->node;
             for (int index = 0; index < tempNode->count; index++) {
                 insertRect(tempNode->branch[index].rect,
                     tempNode->branch[index].item,
                     root,
                     tempNode->level);
             }
-            listNodeT *prev = reInsertList;
-            reInsertList = reInsertList->next;
+            listNodeT *prev = reinsertList;
+            reinsertList = reinsertList->next;
             freeNode(prev->node);
             free(prev);
         }
-        // Check for redundant root (not leaf, 1 child) and eliminate
         if ((*root)->count == 1 && (*root)->level > 0) {
             tempNode = (*root)->branch[0].child;
             *root = tempNode;
@@ -682,20 +580,16 @@ static int removeRect(rectT rect, void *item, nodeT **root) {
     return 1;
 }
 
-// Search for all items which overlap a specified rectangle.
-// The iterator function is called for each item that overlaps the rectangle.
-// The search can be cancelled mid way through by returning Zero from the iterator function.
-// The final return value is the total count of items found.
 static int search(nodeT *node, rectT rect, int(*iterator)(rectT rect, void *item, void *userdata), void *userdata){
     int counter = 0;
     if (node) {
-        if (node->level > 0) { // This is an internal node in the tree
+        if (node->level > 0) {
             for (int index = 0; index < node->count; index++) {
                 if (overlap(rect, node->branch[index].rect)) {
                     counter += search(node->branch[index].child, rect, iterator, userdata);
                 }
             }
-        } else { // This is a leaf node
+        } else {
             for (int index = 0; index < node->count; index++) {
                 if (overlap(rect, node->branch[index].rect)) {
                     if (iterator){
