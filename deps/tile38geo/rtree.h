@@ -38,10 +38,14 @@ typedef struct rtree rtree;
 
 rtree *rtreeNew();
 void rtreeFree(rtree *tr);
-int rtreeSearch(rtree *tr, double minX, double minY, double maxX, double maxY);
 int rtreeRemove(rtree *tr, double minX, double minY, double maxX, double maxY, void *item);
 int rtreeCount(rtree *tr);
 int rtreeInsert(rtree *tr, double minX, double minY, double maxX, double maxY, void *item);
+int rtreeInsert(rtree *tr, double minX, double minY, double maxX, double maxY, void *item);
+
+typedef int(*rtreeSearchFunc)(double minX, double minY, double maxX, double maxY, void *item, void *userdata);
+
+int rtreeSearch(rtree *tr, double minX, double minY, double maxX, double maxY, rtreeSearchFunc iterator, void *userdata);
 
 #if defined(__cplusplus)
 }
