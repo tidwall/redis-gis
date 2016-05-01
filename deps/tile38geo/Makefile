@@ -9,11 +9,10 @@ DEBUG= -g
 R_CC=$(CC) $(R_CFLAGS)
 R_LD=$(CC) $(R_LDFLAGS)
 
-all: geom.o grisu3.o qtree.o rtree.o
+all: geom.o grisu3.o rtree.o
 test: all
 	-@$(R_CC) -o test test.c grisu3.o -I. \
 		geom_test.c geom.o \
-		qtree_test.c qtree.o \
 		rtree_test.c rtree.o
 	-@./test
 
@@ -21,7 +20,6 @@ test: all
 
 geom.o: geom.h geom.c 
 grisu3.o: grisu3.h grisu3.c
-qtree.o: qtree.h qtree.c
 rtree.o: rtree.h rtree.c
 
 .c.o:

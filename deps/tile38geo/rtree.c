@@ -29,7 +29,7 @@
 
 #define NUM_DIMS 2
 
-#include "rtree_base.c"
+#include "rtree_tmpl.c"
 #include "rtree.h"
 
 typedef struct rtree {
@@ -89,6 +89,13 @@ int rtreeInsert(rtree *tr, double minX, double minY, double maxX, double maxY, v
 	}
 	insertRect(makeRect(minX, minY, maxX, maxY), item, &(tr->root), 0);
 	return 1;
+}
+
+void rtreeRemoveAll(rtree *tr){
+	if (tr && tr->root){
+		freeNode(tr->root);
+		tr->root = NULL;
+	}
 }
 
 typedef struct iteratorUserData {

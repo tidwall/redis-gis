@@ -1,4 +1,4 @@
-/* Package rtree - An r-tree implementation.
+/* An r-tree implementation.
  *
  * This file is derived from the work done by Toni Gutman. R-Trees: A Dynamic Index Structure for
  * Spatial Searching, Proc. 1984 ACM SIGMOD International Conference on Management of Data, pp.
