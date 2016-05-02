@@ -37,6 +37,13 @@
 int test_Geom();
 int test_GeomZ();
 int test_GeomZM();
+int test_GeomPoint();
+int test_GeomMultiPoint();
+int test_GeomLineString();
+int test_GeomMultiLineString();
+int test_GeomPolygon();
+int test_GeomMultiPolygon();
+int test_GeomGeometryCollection();
 int test_RTreeInsert();
 int test_RTreeSearch();
 int test_RTreeRemove();
@@ -50,6 +57,13 @@ test tests[] = {
 	{ "geom", test_Geom },
 	{ "geomZ", test_GeomZ },
 	{ "geomZM", test_GeomZM },
+	{ "geomPoint", test_GeomPoint },
+	{ "geomMultiPoint", test_GeomMultiPoint },
+	{ "geomLineString", test_GeomLineString },
+	{ "geomMultiLineString", test_GeomMultiLineString },
+	{ "geomPolygon", test_GeomPolygon },
+	{ "geomMultiPolygon", test_GeomMultiPolygon },
+	{ "geomGeometryCollection", test_GeomGeometryCollection },
 	{ "rtreeInsert", test_RTreeInsert },
 	{ "rtreeSearch", test_RTreeSearch },
 	{ "rtreeRemove", test_RTreeRemove },
@@ -122,7 +136,7 @@ int main(int argc, const char **argv) {
 		}
 		char label[50];
 		sprintf(label, "  testing %s", t.name); 
-		fprintf(stdout, "%-30s", label);
+		fprintf(stdout, "%-35s", label);
 		fflush(stdout);
 		restartClock();
 		int res = t.test();

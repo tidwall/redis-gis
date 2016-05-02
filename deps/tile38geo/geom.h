@@ -57,24 +57,31 @@ typedef enum {
 const char *geomErrText(geomErr err);
 
 typedef enum {
-    GEOM_WKT_SHOW_ZM    = 1<<0,
-    GEOM_WKT_SHOW_EMPTY = 2<<0,
+    GEOM_WKT_SHOW_ZM    = 1<<0, // Show 'Z' and 'M' for 3D/4D points.
+    GEOM_WKT_SHOW_EMPTY = 2<<0, // Use 'EMPTY' instead of '()'
 } geomWKTEncodeOpts;
 
 typedef enum {
-    GEOM_WKT_LEAVE_OPEN = 1<<0,
+    GEOM_WKT_LEAVE_OPEN = 1<<0, // Used when parsing collections.
+    GEOM_WKT_REQUIRE_ZM = 1<<1, // 'Z' and 'M' are required for 3D/4D points.
 } geomWKTDecodeOpts;
 
 typedef char *geom;
 
-typedef struct geomPoint {
-    double x, y;
-} geomPoint;
+typedef struct geomCoord {
+    double x, y, z, m;
+} geomCoord;
+
+int geomCoordString(geomCoord c, int withZ, int withM, char *str);
 
 typedef struct geomRect {
-    geomPoint max, min;
+    geomCoord max, min;
 } geomRect;
 
+geomCoord geomRectCenter(geomRect r);
+geomRect geomRectExpand(geomRect r, geomCoord c);
+geomRect geomRectUnion(geomRect r1, geomRect r2);
+int geomRectString(geomRect r, int withZ, int withM, char *str);
 
 geomErr geomDecodeWKT(const char *input, geomWKTDecodeOpts opts, geom *g, int *size);
 geomErr geomDecodeWKB(const void *input, size_t length, geom *g, int *size);
@@ -87,8 +94,9 @@ char *geomEncodeWKT(geom g, geomWKTEncodeOpts opts);
 void geomFreeWKT(char *wkt);
 geomType geomGetType(geom g);
 
-geomPoint geomGetPoint(geom g);
-geomRect geomGetRect(geom g);
+// geom indexing functions.
+geomCoord geomCenter(geom g);
+geomRect geomBounds(geom g);
 
 
 #if defined(__cplusplus)

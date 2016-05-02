@@ -18,7 +18,7 @@ test: all
 
 .PHONY: all
 
-geom.o: geom.h geom.c 
+geom.o: geom.h geom.c geom_levels.c
 grisu3.o: grisu3.h grisu3.c
 rtree.o: rtree.h rtree.c
 

@@ -27,6 +27,12 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+/*
+BUGS
+
+
+*/
+
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -51,7 +57,7 @@ typedef struct ctx{
     double x, y, z, m;
     int foundZ, foundM; // indicated that z and m in the previous read.
 
-    int writtenPoint; // indicates that at least one point has been written.
+    int writtenCoord; // indicates that at least one coord has been written.
     int mustZ, mustM; // indicates that the stream must make space for Z or M.
 
 } ctx;
@@ -140,7 +146,8 @@ static ctx *decodeHead(ctx *c){
     int read = 0;
 read_next:
     switch (c->p[0]){
-    case '\t': case ' ': case '\r': case '\v': case '\n': case '\f':
+    case '\t': case ' ': case '\r': case '\v': case '\n': case '\f': 
+    case 'z': case 'Z': case 'm': case 'M':
         c = ignorews(c);
         if ((c->p[0]=='E'||c->p[0]=='e')&&(c->p[1]=='M'||c->p[1]=='m')&&(c->p[2]=='P'||c->p[2]=='p')&&(c->p[3]=='T'||c->p[3]=='t')&&(c->p[4]=='Y'||c->p[4]=='y')){
             if (c->isEmpty){
@@ -171,7 +178,6 @@ read_next:
         break;
     }
     read++;
-
     if ((c->hasZ || c->hasM) && !c->isEmpty && read <= 2){
         goto read_next;
     }
@@ -219,6 +225,10 @@ static ctx *decodeNumbers(ctx *c){
             if (c->p[0]==')'||c->p[0]==','){
                 return c;
             }
+            if (c->opts&GEOM_WKT_REQUIRE_ZM){
+                c->err = GEOM_ERR_INPUT;
+                return c;
+            }
             c->z = strtod(c->p, &ptr);
             if (ptr-c->p == 0){
                 c->err = GEOM_ERR_INPUT;
@@ -247,6 +257,10 @@ static ctx *decodeNumbers(ctx *c){
             if (c->p[0]==')'||c->p[0]==','){
                 return c;
             }
+            if (c->opts&GEOM_WKT_REQUIRE_ZM){
+                c->err = GEOM_ERR_INPUT;
+                return c;
+            }
             c->m = strtod(c->p, &ptr);
             if (ptr-c->p == 0){
                 c->err = GEOM_ERR_INPUT;
@@ -272,12 +286,12 @@ static ctx *appendType(ctx *c, int type){
     return c;
 }
 
-static ctx *appendPoint(ctx *c){
+static ctx *appendCoord(ctx *c){
     if (!c->validBuffer){
         return c;
     }
     int sz = 16;
-    if (!c->writtenPoint){
+    if (!c->writtenCoord){
         if (c->hasZ||c->foundZ){
             sz += 8;
             c->mustZ = 1;
@@ -285,6 +299,13 @@ static ctx *appendPoint(ctx *c){
         if (c->hasM||c->foundM){
             sz += 8;
             c->mustM = 1;
+        }
+    } else {
+        if (c->mustZ){
+            sz += 8;
+        }
+        if (c->mustM){
+            sz += 8;
         }
     }
     c = grow(c, sz);
@@ -300,7 +321,7 @@ static ctx *appendPoint(ctx *c){
     if (c->mustM){
         *(g++) = c->m;
     }
-    if (!c->writtenPoint){
+    if (!c->writtenCoord){
         // reset the type
         uint32_t type = *((uint32_t*)(c->g+1));
         if (type>3000) type -= 3000;
@@ -315,7 +336,7 @@ static ctx *appendPoint(ctx *c){
         }
         *((uint32_t*)(c->g+1)) = type;
     }
-    c->writtenPoint = 1;
+    c->writtenCoord = 1;
 
     return c;
 }
@@ -352,7 +373,7 @@ static ctx *geomDecodePoint(ctx *c){
         }
         c->p++;
     }
-    c = appendPoint(c);
+    c = appendCoord(c);
 
     return c;
 }
@@ -402,7 +423,7 @@ static ctx *decodeSeriesSegment(ctx *c, int level){
             if (c->err){
                 return c;
             }
-            c = appendPoint(c);
+            c = appendCoord(c);
             if (c->err){
                 return c;
             }
@@ -565,10 +586,6 @@ static int geomIsM(uint8_t *g){
     return 0;
 }
 
-// static int geomGenericLength(uint8_t *g){
-//     return (int)*((uint32_t*)(g+5));
-// }
-
 ////////////////////////////////////////////////
 // public apis
 ////////////////////////////////////////////////
@@ -615,15 +632,6 @@ static inline char *appendStr(char *str, int *size, int *cap, char *s){
 
 static char *dstr(double n, char *str){
     dtoa_grisu3(n, str);
-    //sprintf(str, "%.15f", n);
-    // char *p = str+nn;
-    // while (*p=='0'&&p>str){
-    //     *p = 0;
-    //     p--;
-    // }
-    // if (*p == '.'){
-    //     *p = 0;
-    // }
     return str;
 }
 
@@ -636,7 +644,7 @@ void geomFreeWKT(char *wkt){
 
 static char *geomEncodeWKTInner(geom g, geomWKTEncodeOpts opts, int *read){
     #define APPEND(s) {if (!(str = appendStr(str, &size, &cap, (s)))) goto oom;}
-    #define APPEND_POINT(){\
+    #define APPEND_COORD(){\
         APPEND(dstr(*((double*)gb), output));\
         gb += 8;\
         APPEND(" ");\
@@ -698,12 +706,12 @@ static char *geomEncodeWKTInner(geom g, geomWKTEncodeOpts opts, int *read){
     int showZM = (isM&&!isZ)||(opts&GEOM_WKT_SHOW_ZM);
     char *wkt = NULL;
 
-    int pointSize = 16;
+    int coordSize = 16;
     if (isZ){
-        pointSize+=8;
+        coordSize+=8;
     }
     if (isM){
-        pointSize+=8;
+        coordSize+=8;
     }
     geomType type = geomGetType(g);
     switch (type){
@@ -712,7 +720,7 @@ static char *geomEncodeWKTInner(geom g, geomWKTEncodeOpts opts, int *read){
     case GEOM_POINT:
         APPEND_HEAD("POINT");
         APPEND("(")
-        APPEND_POINT();
+        APPEND_COORD();
         APPEND(")");
         break;
     case GEOM_LINESTRING:
@@ -727,7 +735,7 @@ static char *geomEncodeWKTInner(geom g, geomWKTEncodeOpts opts, int *read){
             if (i!=0){
                 APPEND(",");    
             }
-            APPEND_POINT();
+            APPEND_COORD();
         }
         APPEND(")");
         break;
@@ -757,7 +765,7 @@ static char *geomEncodeWKTInner(geom g, geomWKTEncodeOpts opts, int *read){
                     if (i!=0){
                         APPEND(",");
                     }
-                    APPEND_POINT();
+                    APPEND_COORD();
                 }
                 APPEND(")");
             }
@@ -799,7 +807,7 @@ static char *geomEncodeWKTInner(geom g, geomWKTEncodeOpts opts, int *read){
                             if (i!=0){
                                 APPEND(",");
                             }
-                            APPEND_POINT();
+                            APPEND_COORD();
                         }
                         APPEND(")");
                     }
@@ -860,38 +868,143 @@ geomErr geomDecodeWKT(const char *input, geomWKTDecodeOpts opts, geom *g, int *s
     return geomDecodeWKTInner(input, opts, g, size, NULL);
 }
 
-geomPoint geomGetPoint(geom g){
-    geomPoint point;
-    memset(&point, 0, sizeof(point));
-    switch (geomGetType(g)){
-    default:
-        break;        
-    case GEOM_UNKNOWN:
-        break;
-    case GEOM_POINT:
-        point.x = ((double*)(((uint8_t*)g)+5))[0];
-        point.y = ((double*)(((uint8_t*)g)+5))[1];
-        break;
+typedef struct ghdr {
+    int z, m;
+    int type;
+} ghdr;
+
+static inline ghdr readhdr(uint8_t *g){
+    ghdr h;
+    uint32_t type = ((uint32_t*)g)[0];
+    if (type >= 3000 && type <= 3999){
+        h.z = 1;
+        h.m = 1;
+        h.type = type - 3000;
+    } else if (type >= 2000 && type <= 2999){
+        h.z = 0;
+        h.m = 1;
+        h.type = type - 2000;
+    } else if (type >= 1000 && type <= 1999){
+        h.z = 1;
+        h.m = 0;
+        h.type = type - 1000;
+    } else if (type <= 999){
+        h.z = 0;
+        h.m = 0;
+        h.type = type;
+    } else {
+        h.z = 0;
+        h.m = 0;
+        h.type = GEOM_UNKNOWN;
     }
-    return point;
+    if (!GEOM_VALID_TYPE(h.type)){
+        h.type = GEOM_UNKNOWN;
+    }
+    return h;
 }
 
-geomRect geomGetRect(geom g){
-    geomRect rect;
-    memset(&rect, 0, sizeof(rect));
-    switch (geomGetType(g)){
-    default:
-        break;        
-    case GEOM_UNKNOWN:
-        break;
-    case GEOM_POINT:
-        rect.min.x = ((double*)(((uint8_t*)g)+5))[0];
-        rect.min.y = ((double*)(((uint8_t*)g)+5))[1];
-        rect.max.x = rect.min.x;
-        rect.max.y = rect.min.y;
-        break;
+static inline geomCoord readcoord(ghdr *h, uint8_t *g, int *sz){
+    geomCoord coord;
+    coord.x = ((double*)g)[0];
+    coord.y = ((double*)g)[1];
+    if (h->z){
+        coord.z = ((double*)g)[2];
+        if (h->m){
+            coord.m = ((double*)g)[3];
+            if (sz){
+                *sz = 4*8;
+            }
+        } else{
+            coord.m = 0;
+            if (sz){
+                *sz = 3*8;
+            }
+        }
+    } else if (h->m) {
+        coord.z = 0;
+        coord.m = ((double*)g)[2];
+        if (sz){
+            *sz = 3*8;
+        }
+    } else {
+        coord.z = 0;
+        coord.m = 0;
+        if (sz){
+           *sz = 2*8;
+        }
     }
-    return rect;
+    return coord;
+}
+
+geomCoord geomRectCenter(geomRect r){
+    geomCoord p;
+    p.x = (r.max.x-r.min.x)/2+r.min.x;
+    p.y = (r.max.y-r.min.y)/2+r.min.y;
+    p.z = (r.max.z-r.min.z)/2+r.min.z;
+    p.m = (r.max.m-r.min.m)/2+r.min.m;
+    return p;
+}
+
+geomRect geomRectExpand(geomRect r, geomCoord p){
+    if (p.x < r.min.x) r.min.x = p.x;
+    if (p.y < r.min.y) r.min.y = p.y;
+    if (p.z < r.min.z) r.min.z = p.z;
+    if (p.m < r.min.m) r.min.m = p.m;
+    if (p.x > r.max.x) r.max.x = p.x;
+    if (p.y > r.max.y) r.max.y = p.y;
+    if (p.z > r.max.z) r.max.z = p.z;
+    if (p.m > r.max.m) r.max.m = p.m;
+    return r;
+}
+
+geomRect geomRectUnion(geomRect r1, geomRect r2){
+    r1 = geomRectExpand(r1, r2.min);
+    r1 = geomRectExpand(r1, r2.max);
+    return r1;
+}
+
+int geomCoordString(geomCoord c, int withZ, int withM, char *str){
+    char *p = str;
+    p += dtoa_grisu3(c.x, p);
+    *(p++) = ' ';
+    p += dtoa_grisu3(c.y, p);
+    if (withZ){
+        *(p++) = ' ';
+        p += dtoa_grisu3(c.z, p);
+        if (withM){
+            *(p++) = ' ';
+            p += dtoa_grisu3(c.m, p);            
+        }
+    } else if (withM){
+        *(p++) = ' ';
+        p += dtoa_grisu3(c.m, p);            
+    }
+    *(p++) = '\0';
+    return p-str-1;
+}
+
+
+int geomRectString(geomRect r, int withZ, int withM, char *str){
+    char *p = str;
+    p += geomCoordString(r.min, withZ, withM, p);
+    *(p++) = ',';
+    p += geomCoordString(r.max, withZ, withM, p);
+    *(p++) = '\0';
+    return str-p-1;
+}
+
+
+#define FROM_GEOM_C
+#include "geom_levels.c"
+
+
+// geomGetCoord return any coord that is contained somewhere within the specified geometry.
+geomCoord geomCenter(geom g){
+    return levelAny_geomCenter((uint8_t*)g, NULL);
+}
+
+geomRect geomBounds(geom g){
+    return levelAny_geomBounds((uint8_t*)g, NULL);
 }
 
 geomErr geomDecodeWKB(const void *input, size_t length, geom *g, int *size){

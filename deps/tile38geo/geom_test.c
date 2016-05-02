@@ -382,3 +382,106 @@ int test_GeomZM(){
     testGeom(50,  4, randGeomGeometryCollection);
     return 1;
 }
+
+static void testGeomPointWKT(char *wkt, double x, double y, double z, double m){
+    geom g = NULL;
+    int sz = 0;
+    geomErr err = geomDecodeWKT(wkt, GEOM_WKT_REQUIRE_ZM, &g, &sz);
+    assert(err == GEOM_ERR_NONE);
+    geomCoord p = geomCenter(g);
+    assert(p.x==x);
+    assert(p.y==y);
+    assert(p.z==z);
+    assert(p.m==m);
+    geomRect r = geomBounds(g);
+    assert(r.min.x==x);
+    assert(r.min.y==y);
+    assert(r.min.z==z);
+    assert(r.min.m==m);
+    assert(r.max.x==x);
+    assert(r.max.y==y);
+    assert(r.max.z==z);
+    assert(r.max.m==m);
+    geomFree(g);
+}
+
+int test_GeomPoint(){
+    testGeomPointWKT("POINTZ(10 11 12)", 10, 11, 12, 0);
+    testGeomPointWKT("POINT Z(10 11 12)", 10, 11, 12, 0);
+    testGeomPointWKT("POINT ZM(10 11 12 13)", 10, 11, 12, 13);
+    testGeomPointWKT("POINTZM(10 11 12 13)", 10, 11, 12, 13);
+    return 1;
+}
+
+
+static void testGeomMBRWKT(char *wkt, char *tstr){
+    geom g = NULL;
+    int sz = 0;
+    geomErr err = geomDecodeWKT(wkt, 0, &g, &sz);
+    assert(err == GEOM_ERR_NONE);
+    geomRect r = geomBounds(g);
+    char str[250];
+    geomRectString(r, 1, 1, str);
+    assert(strcmp(tstr, str)==0);
+    geomFree(g);
+}
+
+
+int test_GeomMultiPoint(){
+    testGeomMBRWKT("MULTIPOINT(10 11, 12 13, 14 15)", "10 11 0 0,14 15 0 0");
+    testGeomMBRWKT("MULTIPOINTZ(10 11 9,12 13 8,14 15 7)", "10 11 7 0,14 15 9 0");
+    testGeomMBRWKT("MULTIPOINT Z(10 11 9,12 13 8,14 15 7)", "10 11 7 0,14 15 9 0");
+    testGeomMBRWKT("MULTIPOINT ZM(10 11 9 100,12 13 8 101,14 15 7 102)", "10 11 7 100,14 15 9 102");
+    testGeomMBRWKT("MULTIPOINT(10 11 9 100,12 13 8 101,14 15 7 102)", "10 11 7 100,14 15 9 102");
+    testGeomMBRWKT("MULTIPOINTM(10 11 100,12 13 101,14 15 102)", "10 11 0 100,14 15 0 102");
+    return 1;
+}
+
+int test_GeomLineString(){
+    testGeomMBRWKT("LINESTRING(10 11, 12 13, 14 15)", "10 11 0 0,14 15 0 0");
+    testGeomMBRWKT("LINESTRINGZ(10 11 9,12 13 8,14 15 7)", "10 11 7 0,14 15 9 0");
+    testGeomMBRWKT("LINESTRING Z(10 11 9,12 13 8,14 15 7)", "10 11 7 0,14 15 9 0");
+    testGeomMBRWKT("LINESTRING ZM(10 11 9 100,12 13 8 101,14 15 7 102)", "10 11 7 100,14 15 9 102");
+    testGeomMBRWKT("LINESTRING(10 11 9 100,12 13 8 101,14 15 7 102)", "10 11 7 100,14 15 9 102");
+    testGeomMBRWKT("LINESTRINGM(10 11 100,12 13 101,14 15 102)", "10 11 0 100,14 15 0 102");
+    return 1;
+}
+
+int test_GeomPolygon(){
+    testGeomMBRWKT("POLYGON((10 11, 12 13, 14 15),(9 8, 12 13))", "10 11 0 0,14 15 0 0");
+    return 1;
+}
+
+int test_GeomMultiLineString(){
+    testGeomMBRWKT("MULTILINESTRING((10 11, 12 13, 14 15),(9 8, 12 13))", "9 8 0 0,14 15 0 0");
+    return 1;
+}
+
+int test_GeomMultiPolygon(){
+    testGeomMBRWKT("MULTIPOLYGON(((10 11, 12 13, 14 15),(9 8, 12 13)))", "10 11 0 0,14 15 0 0");
+    testGeomMBRWKT("MULTIPOLYGON("
+            "((10 11, 12 13, 14 15),(9 8, 12 13)),"
+            "((9 11, 12 13, 14 15),(9 8, 12 13))"
+        ")", "9 11 0 0,14 15 0 0");
+    return 1;
+}
+
+int test_GeomGeometryCollection(){
+    testGeomMBRWKT("GEOMETRYCOLLECTION EMPTY", "0 0 0 0,0 0 0 0");
+    testGeomMBRWKT("GEOMETRYCOLLECTION ()", "0 0 0 0,0 0 0 0");
+    testGeomMBRWKT("GEOMETRYCOLLECTION ("
+        "MULTIPOINT(10 11, 12 13, 14 15)"
+    ")", "10 11 0 0,14 15 0 0");
+    testGeomMBRWKT("GEOMETRYCOLLECTION ("
+        "MULTIPOINT(10 11, 12 13, 14 15),"
+        "POLYGON((101 111, 121 131, 141 151),(9 8, 12 13))"
+    ")", "10 11 0 0,141 151 0 0");
+    return 1;
+}
+
+
+
+
+
+
+
