@@ -308,7 +308,7 @@ struct redisCommand redisCommandTable[] = {
     {"ggetall",ggetallCommand,2,"r",0,NULL,1,1,1,0,0},
     {"gexists",gexistsCommand,3,"rF",0,NULL,1,1,1,0,0},
     {"gscan",gscanCommand,-3,"rR",0,NULL,1,1,1,0,0},
-    {"gwithin",gwithinCommand,-4,"rR",0,NULL,1,1,1,0,0},
+    {"gsearch",gsearchCommand,-3,"rR",0,NULL,1,1,1,0,0},
 
 };
 

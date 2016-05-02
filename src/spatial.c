@@ -617,20 +617,25 @@ static int strieq(const char *str1, const char *str2){
 #define RADIUS     1
 #define GEOMETRY   2
 #define BOUNDS     3
+
+// typedef struct searchItem {
+
+//     void *item;
+// } searchItem;
+
 typedef struct searchContext {
     client *c;
     int searchType;
     int targetType;
-    int count;
+    int len;
+    int cap;
+
+
     geomRect r;
 
     // radius
     double lat, lon, meters;
 
-    // bounds
-    double minLat, minLon;
-    double maxLat, maxLon;
-    
     // geometry
     geom g;
     int sz;
@@ -638,66 +643,83 @@ typedef struct searchContext {
 
 static int searchIterator(double minX, double minY, double maxX, double maxY, void *item, void *userdata){
     searchContext *ctx = userdata;
+    switch (ctx->targetType){
+
+    }
     double lat = (maxY-minY)/2+minY;
     double lon = (maxX-minX)/2+minX;
     if (geoutilDistance(ctx->lat, ctx->lon, lat, lon) <= ctx->meters){
-        ctx->count++;
+        //ctx->count++;
     }
     return 1;
 }
 
-void gwithinCommand(client *c){
+void gsearchCommand(client *c){
     robj *o;
     searchContext ctx;
     memset(&ctx, 0, sizeof(searchContext));
     ctx.c = c;
-    ctx.searchType = WITHIN;
+    ctx.searchType = INTERSECTS;
+    int i = 2;
+    if (strieq(c->argv[i]->ptr, "within")){
+        ctx.searchType = WITHIN;
+        i++;
+    } else if (strieq(c->argv[i]->ptr, "intersects")){
+        ctx.searchType = INTERSECTS;
+        i++;
+    }
 
     // parse the target.
-    int i = 2;
-    char *arg = c->argv[i]->ptr;
-    if (strieq(arg, "radius")){
-        i++;
-        if (i>=c->argc-2){
+    if (strieq(c->argv[i]->ptr, "radius")){
+        if (i>=c->argc-3){
             addReplyError(c, "need longitude, latitude, meters");
             return;
         }
-        if (getDoubleFromObjectOrReply(c, c->argv[i], &ctx.lon, "need numeric longitude") != C_OK) {
-            return;
-        }
-        i++;
-        if (getDoubleFromObjectOrReply(c, c->argv[i], &ctx.lat, "need numeric latitude") != C_OK) {
-            return;
-        }
-        i++;
-        if (getDoubleFromObjectOrReply(c, c->argv[i], &ctx.meters, "need numeric meters") != C_OK) {
-            return;
-        }
+        if (getDoubleFromObjectOrReply(c, c->argv[i+1], &ctx.lon, "need numeric longitude") != C_OK) return;
+        if (getDoubleFromObjectOrReply(c, c->argv[i+2], &ctx.lat, "need numeric latitude") != C_OK) return;
+        if (getDoubleFromObjectOrReply(c, c->argv[i+3], &ctx.meters, "need numeric meters") != C_OK) return;
         if (ctx.lon < -180 || ctx.lon > 180 || ctx.lat < -90 || ctx.lat > 90){
             addReplyError(c, "invalid longitude/latitude pair");
             return;
         }
         ctx.targetType = RADIUS;
         ctx.r = geoutilBoundsFromLatLon(ctx.lat, ctx.lon, ctx.meters);
-    } else if (strieq(arg, "geom") || strieq(arg, "geometry")){
-        i++;
-        if (i==c->argc){
+        i+=4;
+    } else if (strieq(c->argv[i]->ptr, "geom") || strieq(c->argv[i]->ptr, "geometry")){
+        if (i==c->argc-1){
             addReplyError(c, "need geometry");
             return;    
         }
         geom g = NULL;
         int sz = 0;
-        geomErr err = geomDecode(c->argv[i]->ptr, sdslen(c->argv[i]->ptr), 0, &g, &sz);
+        geomErr err = geomDecode(c->argv[i+1]->ptr, sdslen(c->argv[i+1]->ptr), 0, &g, &sz);
         if (err!=GEOM_ERR_NONE){
             addReplyError(c, "invalid geometry");
             return;
         }
-        i++;
         ctx.g = g;
         ctx.sz = sz;
         ctx.targetType = GEOMETRY;
         ctx.r = geomBounds(ctx.g);
-    } else{
+        i+=2;
+    } else if (strieq(c->argv[i]->ptr, "bounds")){
+        if (i>=c->argc-4){
+            addReplyError(c, "need min longitude, min latitude, max longitude, max latitude");
+            return;
+        }
+        if (getDoubleFromObjectOrReply(c, c->argv[i+1], &ctx.r.min.x, "need numeric min longitude") != C_OK) return;
+        if (getDoubleFromObjectOrReply(c, c->argv[i+2], &ctx.r.min.y, "need numeric min latitude") != C_OK) return;
+        if (getDoubleFromObjectOrReply(c, c->argv[i+3], &ctx.r.max.x, "need numeric max longitude") != C_OK) return;
+        if (getDoubleFromObjectOrReply(c, c->argv[i+4], &ctx.r.max.y, "need numeric max latitude") != C_OK) return;
+        if ((ctx.r.min.x < -180 || ctx.r.min.x > 180 || ctx.r.min.y < -90 || ctx.r.min.y > 90)||
+            (ctx.r.max.x < -180 || ctx.r.max.x > 180 || ctx.r.max.y < -90 || ctx.r.max.y > 90)){
+            addReplyError(c, "invalid longitude/latitude pairs");
+            return;
+        }
+        ctx.targetType = BOUNDS;
+        i+=4;
+
+    } else {
         addReplyError(c, "unsupported target provided. please use radius or geometry");
         return;
     }
@@ -710,7 +732,7 @@ void gwithinCommand(client *c){
     printf("%d\n", res);
 
     
-    addReplyError(c, "nearby unsupported");
+    //addReplyError(c, "nearby unsupported");
 done:
     if (ctx.g){
         geomFree(ctx.g);
