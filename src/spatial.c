@@ -37,6 +37,7 @@
 #define HASH_SET_TAKE_FIELD (1<<0)
 #define HASH_SET_TAKE_VALUE (1<<1)
 #define HASH_SET_COPY 0
+
 int hashTypeSet(robj *o, sds field, sds value, int flags);
 void hashTypeTryConversion(robj *o, robj **argv, int start, int end);
 sds hashTypeGetFromHashTable(robj *o, sds field);
@@ -298,10 +299,12 @@ static int spatialDelValue(spatial *s, sds key){
         return 1;
     }
     geomRect r = geomBounds(g);
+    int res = rtreeRemove(s->tr, r.min.x, r.min.y, r.max.x, r.max.y, g);
+    /*
     char str[250];
     geomRectString(r, 0, 0, str);
-    int res = rtreeRemove(s->tr, r.min.x, r.min.y, r.max.x, r.max.y, g);
     printf("del: %s (%x) (%s) (%d)\n", key, g, str, res);
+    */
     return res;
 }
 
@@ -309,14 +312,14 @@ static int spatialSetValue(spatial *s, sds key, sds val){
     spatialDelValue(s, key);
     geom g = (geom)val;
     geomRect r = geomBounds(g);
+    int res = rtreeInsert(s->tr, r.min.x, r.min.y, r.max.x, r.max.y, g);
+    /*
     char str[250];
     geomRectString(r, 0, 0, str);
-    int res = rtreeInsert(s->tr, r.min.x, r.min.y, r.max.x, r.max.y, g);
-
     printf("set: %s (%x) (%s) (%d)\n", key, g, str, res);
+    */
     return res;
 }
-
 
 /* robjSpatialNewHash creates a new spatial object with an existing hash.
  * This is is called from rdbLoad(). */
@@ -336,7 +339,6 @@ void *robjSpatialNewHash(void *o){
     }
     return so;
 }
-
 
 void spatialFree(spatial *s){
     if (s){
@@ -560,7 +562,6 @@ void genericGgetallCommand(client *c, int flags) {
             count++;
         }
     }
-
     hashTypeReleaseIterator(hi);
     serverAssert(count == length);
 }
@@ -595,4 +596,53 @@ void gscanCommand(client *c) {
         checkType(c,o,OBJ_SPATIAL)) return;
     h = spatialGetHash(o);        
     scanGeomCommand(c,h,cursor);
+}
+
+static int strieq(const char *str1, const char *str2){
+    for (int i=0;;i++){
+        if (tolower(str1[i]) != tolower(str2[i])){
+            return 0;
+        }
+        if (!str1[i]){
+            break;
+        }
+    }
+    return 1;
+}
+
+void gnearbyCommand(client *c){
+    robj *o, *h;
+    double x, y, meters;
+    for (int i=2;i<c->argc;i++){
+        char *arg = c->argv[i]->ptr;
+        if (strieq(arg, "point")){
+            i++;
+            if (i>=c->argc-2){
+                addReplyError(c, "need longitude, latitude, meters");
+                return;
+            }
+            if (getDoubleFromObjectOrReply(c, c->argv[i], &x, "need numeric longitude") != C_OK) {
+                return;
+            }
+            i++;
+            if (getDoubleFromObjectOrReply(c, c->argv[i], &y, "need numeric latitude") != C_OK) {
+                return;
+            }
+            i++;
+            if (getDoubleFromObjectOrReply(c, c->argv[i], &meters, "need numeric meters") != C_OK) {
+                return;
+            }
+            if (x < -180 || x > 180 || y < -90 || y > 90){
+                addReplyError(c, "invalid longitude/latitude pair");
+                return;
+            }
+        }
+    }
+    printf("%f %f\n", x, y);
+
+    if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.emptymultibulk)) == NULL
+        || checkType(c,o,OBJ_SPATIAL)) return;
+    spatial *s = o->ptr;
+    
+    addReplyError(c, "nearby unsupported");
 }

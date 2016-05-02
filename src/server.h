@@ -1706,6 +1706,7 @@ void gvalsCommand(client *c);
 void ggetallCommand(client *c);
 void gexistsCommand(client *c);
 void gscanCommand(client *c);
+void gnearbyCommand(client *c);
 
 #if defined(__GNUC__)
 void *calloc(size_t count, size_t size) __attribute__ ((deprecated));
