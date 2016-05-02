@@ -302,11 +302,6 @@ static int spatialDelValue(spatial *s, sds key){
     }
     geomRect r = geomBounds(g);
     int res = rtreeRemove(s->tr, r.min.x, r.min.y, r.max.x, r.max.y, g);
-    /*
-    char str[250];
-    geomRectString(r, 0, 0, str);
-    printf("del: %s (%x) (%s) (%d)\n", key, g, str, res);
-    */
     return res;
 }
 
@@ -314,12 +309,7 @@ static int spatialSetValue(spatial *s, sds key, sds val){
     spatialDelValue(s, key);
     geom g = (geom)val;
     geomRect r = geomBounds(g);
-    int res = rtreeInsert(s->tr, r.min.x, r.min.y, r.max.x, r.max.y, g);
-    /*
-    char str[250];
-    geomRectString(r, 0, 0, str);
-    printf("set: %s (%x) (%s) (%d)\n", key, g, str, res);
-    */
+    int res = rtreeInsert(s->tr, r.min.x, r.min.y, r.max.x, r.max.y, val);
     return res;
 }
 
@@ -393,7 +383,8 @@ void gsetCommand(client *c) {
     h = spatialGetHash(o);
     hashTypeTryConversion(h,c->argv,2,3);
     spatialSetValue(s,c->argv[2]->ptr,c->argv[3]->ptr);
-    update = hashTypeSet(h,c->argv[2]->ptr,c->argv[3]->ptr,HASH_SET_TAKE_VALUE);
+    update = hashTypeSet(h,c->argv[2]->ptr,c->argv[3]->ptr,HASH_SET_TAKE_FIELD|HASH_SET_TAKE_VALUE);
+    c->argv[2] = createRawStringObject("", 0); // assign empty.
     c->argv[3] = createRawStringObject("", 0); // assign empty.
     addReply(c, update ? shared.czero : shared.cone);
     signalModifiedKey(c->db,c->argv[1]);
@@ -497,7 +488,8 @@ void gsetnxCommand(client *c) {
         c->argv[3] = createRawStringObject((char*)g, sz);
         geomFree(g);
         spatialSetValue(s, c->argv[2]->ptr,c->argv[3]->ptr);
-        hashTypeSet(h,c->argv[2]->ptr,c->argv[3]->ptr,HASH_SET_TAKE_VALUE);
+        hashTypeSet(h,c->argv[2]->ptr,c->argv[3]->ptr,HASH_SET_TAKE_FIELD|HASH_SET_TAKE_VALUE);
+        c->argv[2] = createRawStringObject("", 0); // assign empty.
         c->argv[3] = createRawStringObject("", 0); // assign empty.
         addReply(c, shared.cone);
         signalModifiedKey(c->db,c->argv[1]);
@@ -529,7 +521,8 @@ void gmsetCommand(client *c) {
         c->argv[i+1] = createRawStringObject((char*)g, sz);
         geomFree(g);
         spatialSetValue(s,c->argv[i]->ptr,c->argv[i+1]->ptr);
-        hashTypeSet(h,c->argv[i]->ptr,c->argv[i+1]->ptr,HASH_SET_TAKE_VALUE);
+        hashTypeSet(h,c->argv[i+0]->ptr,c->argv[i+1]->ptr,HASH_SET_TAKE_FIELD|HASH_SET_TAKE_VALUE);
+        c->argv[i+0] = createRawStringObject("", 0); // assign empty.
         c->argv[i+1] = createRawStringObject("", 0); // assign empty.
     }
     addReply(c, shared.ok);
@@ -618,17 +611,20 @@ static int strieq(const char *str1, const char *str2){
 #define GEOMETRY   2
 #define BOUNDS     3
 
-// typedef struct searchItem {
-
-//     void *item;
-// } searchItem;
+typedef struct resultItem {
+    sds field;
+    sds value;
+} resultItem;
 
 typedef struct searchContext {
+    spatial *s;
     client *c;
     int searchType;
     int targetType;
+    int fail;
     int len;
     int cap;
+    resultItem *results;
 
 
     geomRect r;
@@ -643,14 +639,48 @@ typedef struct searchContext {
 
 static int searchIterator(double minX, double minY, double maxX, double maxY, void *item, void *userdata){
     searchContext *ctx = userdata;
-    switch (ctx->targetType){
+    geom g = dictFetchValue(ctx->s->h->ptr, (sds)item);
+    if (!g){
+        addReplyError(ctx->c, "index/dict mismatch");
+        ctx->fail = 1;
+        return 0;
+    }
 
+    // append item
+    if (ctx->len == ctx->cap){
+        int ncap = ctx->cap;
+        if (ncap == 0){
+            ncap = 1;
+        } else {
+            ncap *= 2;
+        }
+        resultItem *nresults = zrealloc(ctx->results, ncap*sizeof(resultItem));
+        if (!nresults){
+            addReplyError(ctx->c, "out of memory");
+            ctx->fail = 1;
+            return 0;
+        }
+        ctx->results = nresults;
+        ctx->cap = ncap;
     }
-    double lat = (maxY-minY)/2+minY;
-    double lon = (maxX-minX)/2+minX;
-    if (geoutilDistance(ctx->lat, ctx->lon, lat, lon) <= ctx->meters){
-        //ctx->count++;
-    }
+    ctx->results[ctx->len].field = (sds)item;
+    ctx->results[ctx->len].value = (sds)g;
+    ctx->len++;
+
+
+    //geomRect r = geomBounds(g);
+
+
+
+    // switch (ctx->targetType){
+
+
+    // }
+    // double lat = (maxY-minY)/2+minY;
+    // double lon = (maxX-minX)/2+minX;
+    // if (geoutilDistance(ctx->lat, ctx->lon, lat, lon) <= ctx->meters){
+    //     //ctx->count++;
+    // }
     return 1;
 }
 
@@ -726,16 +756,21 @@ void gsearchCommand(client *c){
     if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.emptymultibulk)) == NULL || checkType(c,o,OBJ_SPATIAL)) {
         goto done;
     }
-    spatial *s = o->ptr;
+    ctx.s = o->ptr;
 
-    int res = rtreeSearch(s->tr, ctx.r.min.x, ctx.r.min.y, ctx.r.max.x, ctx.r.max.y, searchIterator, &ctx);
-    printf("%d\n", res);
+    rtreeSearch(ctx.s->tr, ctx.r.min.x, ctx.r.min.y, ctx.r.max.x, ctx.r.max.y, searchIterator, &ctx);
+    printf("%d\n", ctx.len);
+    if (!ctx.fail){
+        // return results
+        addReplyMultiBulkLen(c, 0);
+        //addReplyBulkLongLong(c,cursor);
 
-    
-    //addReplyError(c, "nearby unsupported");
+    }
 done:
     if (ctx.g){
         geomFree(ctx.g);
     }
-
+    if (ctx.results){
+        zfree(ctx.results);
+    }
 }
