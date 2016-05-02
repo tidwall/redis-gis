@@ -102,27 +102,12 @@ static void addHashIteratorCursorToReply(client *c, hashTypeIterator *hi, int wh
 static void scanGeomCallback(void *privdata, const dictEntry *de) {
     void **pd = (void**) privdata;
     list *keys = pd[0];
-    robj *o = pd[1];
     robj *key, *val = NULL;
 
-    if (o == NULL) {
-        sds sdskey = dictGetKey(de);
-        key = createStringObject(sdskey, sdslen(sdskey));
-    } else if (o->type == OBJ_SET) {
-        sds keysds = dictGetKey(de);
-        key = createStringObject(keysds,sdslen(keysds));
-    } else if (o->type == OBJ_HASH) {
-        sds sdskey = dictGetKey(de);
-        sds sdsval = dictGetVal(de);
-        key = createStringObject(sdskey,sdslen(sdskey));
-        val = createGeomStringObject(sdsval,sdslen(sdsval));
-    } else if (o->type == OBJ_ZSET) {
-        sds sdskey = dictGetKey(de);
-        key = createStringObject(sdskey,sdslen(sdskey));
-        val = createStringObjectFromLongDouble(*(double*)dictGetVal(de),0);
-    } else {
-        serverPanic("Type not handled in SCAN callback.");
-    }
+    sds sdskey = dictGetKey(de);
+    sds sdsval = dictGetVal(de);
+    key = createStringObject(sdskey,sdslen(sdskey));
+    val = createGeomStringObject(sdsval,sdslen(sdsval));
 
     listAddNodeTail(keys, key);
     if (val) listAddNodeTail(keys, val);
@@ -307,17 +292,29 @@ err:
     return NULL;
 }
 
-static void spatialDelValue(spatial *s, sds key){
-    void *value = dictFetchValue(s->h->ptr, key);
-    if (!value){
-        return;
+static int spatialDelValue(spatial *s, sds key){
+    geom g = dictFetchValue(s->h->ptr, key);
+    if (!g){
+        return 1;
     }
-    printf("del: %s (%x)\n", key, value);
+    geomRect r = geomBounds(g);
+    char str[250];
+    geomRectString(r, 0, 0, str);
+    int res = rtreeRemove(s->tr, r.min.x, r.min.y, r.max.x, r.max.y, g);
+    printf("del: %s (%x) (%s) (%d)\n", key, g, str, res);
+    return res;
 }
 
-static void spatialSetValue(spatial *s, sds key, sds val){
+static int spatialSetValue(spatial *s, sds key, sds val){
     spatialDelValue(s, key);
-    printf("set: %s (%x)\n", key, val);
+    geom g = (geom)val;
+    geomRect r = geomBounds(g);
+    char str[250];
+    geomRectString(r, 0, 0, str);
+    int res = rtreeInsert(s->tr, r.min.x, r.min.y, r.max.x, r.max.y, g);
+
+    printf("set: %s (%x) (%s) (%d)\n", key, g, str, res);
+    return res;
 }
 
 
