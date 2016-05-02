@@ -27,12 +27,6 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/*
-BUGS
-
-
-*/
-
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>

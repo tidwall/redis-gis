@@ -39,8 +39,12 @@
  * as their string length can be queried in constant time. */
 void hashTypeTryConversion(robj *o, robj **argv, int start, int end) {
     int i;
-
-    if (o->encoding != OBJ_ENCODING_ZIPLIST) return;
+    printf("TRY CONVERSION!\n");
+    if (o->encoding != OBJ_ENCODING_ZIPLIST) {
+        printf("NOT A ZIPLIST!\n");
+        return;
+    }
+    printf("ZIPLIST!\n");
 
     for (i = start; i <= end; i++) {
         if (sdsEncodedObject(argv[i]) &&
@@ -108,10 +112,12 @@ sds hashTypeGetFromHashTable(robj *o, sds field) {
  * for C_OK and checking if vll (or vstr) is NULL. */
 int hashTypeGetValue(robj *o, sds field, unsigned char **vstr, unsigned int *vlen, long long *vll) {
     if (o->encoding == OBJ_ENCODING_ZIPLIST) {
+        printf("ZIP!!\n");
         *vstr = NULL;
         if (hashTypeGetFromZiplist(o, field, vstr, vlen, vll) == 0)
             return C_OK;
     } else if (o->encoding == OBJ_ENCODING_HT) {
+        printf("HASH!!\n");
         sds value;
         if ((value = hashTypeGetFromHashTable(o, field)) != NULL) {
             *vstr = (unsigned char*) value;
