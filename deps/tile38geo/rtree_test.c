@@ -5,6 +5,7 @@
 #include <assert.h>
 #include <time.h>
 
+#include "test.h"
 #include "rtree.h"
 
 static double randd() { return ((rand()%RAND_MAX) / (double)RAND_MAX); }

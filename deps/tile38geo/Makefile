@@ -9,11 +9,12 @@ DEBUG= -g
 R_CC=$(CC) $(R_CFLAGS)
 R_LD=$(CC) $(R_LDFLAGS)
 
-all: geom.o grisu3.o rtree.o
+all: geom.o grisu3.o rtree.o geoutil.o
 test: all
 	-@$(R_CC) -o test test.c grisu3.o -I. \
 		geom_test.c geom.o \
-		rtree_test.c rtree.o
+		rtree_test.c rtree.o \
+		geoutil_test.c geoutil.o
 	-@./test
 
 .PHONY: all
@@ -21,6 +22,7 @@ test: all
 geom.o: geom.h geom.c geom_levels.c
 grisu3.o: grisu3.h grisu3.c
 rtree.o: rtree.h rtree.c
+geoutil.o: geoutil.h geoutil.c
 
 .c.o:
 	$(R_CC) -c $<

@@ -47,6 +47,8 @@ int test_GeomGeometryCollection();
 int test_RTreeInsert();
 int test_RTreeSearch();
 int test_RTreeRemove();
+int test_GeoUtilDistance();
+int test_GeoUtilDestination();
 
 typedef struct test{
 	char *name;
@@ -67,6 +69,8 @@ test tests[] = {
 	{ "rtreeInsert", test_RTreeInsert },
 	{ "rtreeSearch", test_RTreeSearch },
 	{ "rtreeRemove", test_RTreeRemove },
+	{ "geoutilDistance", test_GeoUtilDistance },
+	{ "geoutilDestination", test_GeoUtilDestination },
 };
 
 static int abort_handled = 0;

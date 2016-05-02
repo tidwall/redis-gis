@@ -28,9 +28,11 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <ctype.h>
 #include "server.h"
 #include "spatial.h"
 #include "rtree.h"
+#include "geoutil.h"
 #include "geom.h"
 
 /* Importing some stuff from t_hash.c but these should exist in server.h */
@@ -610,39 +612,108 @@ static int strieq(const char *str1, const char *str2){
     return 1;
 }
 
-void gnearbyCommand(client *c){
-    robj *o, *h;
-    double x, y, meters;
-    for (int i=2;i<c->argc;i++){
-        char *arg = c->argv[i]->ptr;
-        if (strieq(arg, "point")){
-            i++;
-            if (i>=c->argc-2){
-                addReplyError(c, "need longitude, latitude, meters");
-                return;
-            }
-            if (getDoubleFromObjectOrReply(c, c->argv[i], &x, "need numeric longitude") != C_OK) {
-                return;
-            }
-            i++;
-            if (getDoubleFromObjectOrReply(c, c->argv[i], &y, "need numeric latitude") != C_OK) {
-                return;
-            }
-            i++;
-            if (getDoubleFromObjectOrReply(c, c->argv[i], &meters, "need numeric meters") != C_OK) {
-                return;
-            }
-            if (x < -180 || x > 180 || y < -90 || y > 90){
-                addReplyError(c, "invalid longitude/latitude pair");
-                return;
-            }
-        }
-    }
-    printf("%f %f\n", x, y);
+#define WITHIN     1
+#define INTERSECTS 2
+#define RADIUS     1
+#define GEOMETRY   2
+#define BOUNDS     3
+typedef struct searchContext {
+    client *c;
+    int searchType;
+    int targetType;
+    int count;
+    geomRect r;
 
-    if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.emptymultibulk)) == NULL
-        || checkType(c,o,OBJ_SPATIAL)) return;
+    // radius
+    double lat, lon, meters;
+
+    // bounds
+    double minLat, minLon;
+    double maxLat, maxLon;
+    
+    // geometry
+    geom g;
+    int sz;
+} searchContext;
+
+static int searchIterator(double minX, double minY, double maxX, double maxY, void *item, void *userdata){
+    searchContext *ctx = userdata;
+    double lat = (maxY-minY)/2+minY;
+    double lon = (maxX-minX)/2+minX;
+    if (geoutilDistance(ctx->lat, ctx->lon, lat, lon) <= ctx->meters){
+        ctx->count++;
+    }
+    return 1;
+}
+
+void gwithinCommand(client *c){
+    robj *o;
+    searchContext ctx;
+    memset(&ctx, 0, sizeof(searchContext));
+    ctx.c = c;
+    ctx.searchType = WITHIN;
+
+    // parse the target.
+    int i = 2;
+    char *arg = c->argv[i]->ptr;
+    if (strieq(arg, "radius")){
+        i++;
+        if (i>=c->argc-2){
+            addReplyError(c, "need longitude, latitude, meters");
+            return;
+        }
+        if (getDoubleFromObjectOrReply(c, c->argv[i], &ctx.lon, "need numeric longitude") != C_OK) {
+            return;
+        }
+        i++;
+        if (getDoubleFromObjectOrReply(c, c->argv[i], &ctx.lat, "need numeric latitude") != C_OK) {
+            return;
+        }
+        i++;
+        if (getDoubleFromObjectOrReply(c, c->argv[i], &ctx.meters, "need numeric meters") != C_OK) {
+            return;
+        }
+        if (ctx.lon < -180 || ctx.lon > 180 || ctx.lat < -90 || ctx.lat > 90){
+            addReplyError(c, "invalid longitude/latitude pair");
+            return;
+        }
+        ctx.targetType = RADIUS;
+        ctx.r = geoutilBoundsFromLatLon(ctx.lat, ctx.lon, ctx.meters);
+    } else if (strieq(arg, "geom") || strieq(arg, "geometry")){
+        i++;
+        if (i==c->argc){
+            addReplyError(c, "need geometry");
+            return;    
+        }
+        geom g = NULL;
+        int sz = 0;
+        geomErr err = geomDecode(c->argv[i]->ptr, sdslen(c->argv[i]->ptr), 0, &g, &sz);
+        if (err!=GEOM_ERR_NONE){
+            addReplyError(c, "invalid geometry");
+            return;
+        }
+        i++;
+        ctx.g = g;
+        ctx.sz = sz;
+        ctx.targetType = GEOMETRY;
+        ctx.r = geomBounds(ctx.g);
+    } else{
+        addReplyError(c, "unsupported target provided. please use radius or geometry");
+        return;
+    }
+    if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.emptymultibulk)) == NULL || checkType(c,o,OBJ_SPATIAL)) {
+        goto done;
+    }
     spatial *s = o->ptr;
+
+    int res = rtreeSearch(s->tr, ctx.r.min.x, ctx.r.min.y, ctx.r.max.x, ctx.r.max.y, searchIterator, &ctx);
+    printf("%d\n", res);
+
     
     addReplyError(c, "nearby unsupported");
+done:
+    if (ctx.g){
+        geomFree(ctx.g);
+    }
+
 }
