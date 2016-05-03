@@ -49,6 +49,15 @@ int test_RTreeSearch();
 int test_RTreeRemove();
 int test_GeoUtilDistance();
 int test_GeoUtilDestination();
+int test_PolyRayInside();
+int test_PolyRayExteriorHoles();
+int test_PolyInsideShapes();
+int test_PolyIntersectsLines();
+int test_PolyIntersectsShapes();
+int test_PolyRectIntersects();
+int test_PolyRectInside();
+
+
 
 typedef struct test{
 	char *name;
@@ -71,6 +80,13 @@ test tests[] = {
 	{ "rtreeRemove", test_RTreeRemove },
 	{ "geoutilDistance", test_GeoUtilDistance },
 	{ "geoutilDestination", test_GeoUtilDestination },
+	{ "polyRayInside", test_PolyRayInside },
+	{ "polyRayExteriorHoles", test_PolyRayExteriorHoles },
+	{ "polyInsideShapes", test_PolyInsideShapes },
+	{ "polyIntersectsLines", test_PolyIntersectsLines },
+	{ "polyIntersectsShapes", test_PolyIntersectsShapes },
+	{ "polyRectIntersects", test_PolyRectIntersects },
+	{ "polyRectInside", test_PolyRectInside },
 };
 
 static int abort_handled = 0;
