@@ -29,9 +29,7 @@
 #include <stdint.h>
 #include "poly.h"
 
-//static polyPolygon emptyPolygon = {0,0,0};
 static polyMultiPolygon emptyMultiPolygon = {0,0,0};
-
 
 int lineintersects(
 	polyPoint a, polyPoint b, // segment 1
