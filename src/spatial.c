@@ -27,6 +27,12 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
+#define TRACE 0
+
+#define GREEN    "\033[32;1m"
+#define RED      "\033[31m" 
+#define MAGENTA  "\x1b[35m"
+#define CLEAR    "\033[0m"
 
 #include <ctype.h>
 #include "server.h"
@@ -35,15 +41,200 @@
 #include "geoutil.h"
 #include "geom.h"
 
+int hashTypeSet(robj *o, sds field, sds value, int flags);
+sds hashTypeGetFromHashTable(robj *o, sds field);
+size_t hashTypeGetValueLength(robj *o, sds field);
+
+struct spatial {
+    robj *h;       // main hash store that persists to RDB.
+    rtree *tr;     // underlying spatial index.
+    // The following fields are for mapping an idx to a key and 
+    // vice versa. The rtree expects that each entry has a pointer to
+    // an objected in memory. This should be the base address of the 
+    // sds key that is stored in the main hash store, that way there is
+    // no extra memory overhead except a pointer. But at the moment I'm 
+    // 100% sure how safe it is to expect that a key in the hash will 
+    // not change it's base pointer address. So until further testing
+    // around hash key stability we will increment an idx pointer and
+    // map this value to a key, then assign this idx value to each 
+    // rtree entry. This allows a reverse lookup to the key. This is a 
+    // safe (albeit slower and higher mem usage) way to track entries.
+    char *idx;     // pointer that acts as a private id for entries.
+    robj *keyhash; // stores key -> idx
+    robj *idxhash; // stores idx -> key
+};
+
+static robj *spatialGetHash(robj *o){
+    return ((spatial*)o->ptr)->h;
+}
+
+void *robjSpatialGetHash(void *o){
+    return spatialGetHash((robj*)o);
+}
+
+
+spatial *spatialNew(){
+    spatial *s = zcalloc(sizeof(spatial));
+    if (!s){
+        goto err;
+    }
+    s->h = createHashObject();
+    s->keyhash = createHashObject();
+    s->idxhash = createHashObject();
+    hashTypeConvert(s->h, OBJ_ENCODING_HT);
+    hashTypeConvert(s->keyhash, OBJ_ENCODING_HT);
+    hashTypeConvert(s->idxhash, OBJ_ENCODING_HT);
+    s->tr = rtreeNew();
+    if (!s->tr){
+        goto err;
+    }
+    return s;
+err:
+    spatialFree(s);
+    return NULL;
+}
+
+static int spatialDelValue(spatial *s, sds key, geomRect *rin){
+    if (0){
+        s = 0;
+        key = 0;
+        rin = 0;
+    }
+    // get the idx
+    sds value = hashTypeGetFromHashTable(s->keyhash, key);
+    if (!value || sdslen(value) != 8){
+        return 0;
+    }
+    char *idx = (char*)(*((uint64_t*)value));
+    geomRect r;
+    if (rin){
+        r = *rin;
+    } else {
+        sds value = hashTypeGetFromHashTable(s->h, key);
+        if (!value){
+            return 0;
+        }
+        r = geomBounds((geom)value);
+    }
+    // update the rtree
+    int res = rtreeRemove(s->tr, r.min.x, r.min.y, r.max.x, r.max.y, idx);
+    
+    if (TRACE){
+            printf(RED "DEL " CLEAR "%s %d", key, (int)idx);
+        
+        if (res){
+            printf(GREEN " OK" CLEAR);
+        } else{
+            printf(RED " FAIL" CLEAR);
+        }
+        int count = rtreeCount(s->tr);
+        printf(" %d item", count);
+        if (count!=1){
+            printf("s");
+        }
+        printf("\n");
+    }
+    return res;
+}
+
+static int spatialSetValue(spatial *s, sds key, sds val){
+
+    geom g = (geom)val;
+    geomRect r = geomBounds(g);
+    spatialDelValue(s, key, &r);
+
+    // create a new idx/key entry
+    s->idx++;
+    uint64_t nidx = (uint64_t)s->idx;
+    sds sidx = sdsnewlen(&nidx, 8);
+    hashTypeSet(s->idxhash, sidx, key, 0);
+    hashTypeSet(s->keyhash, key, sidx, 0);
+    sdsfree(sidx);
+
+    // update the rtree
+    int res = rtreeInsert(s->tr, r.min.x, r.min.y, r.max.x, r.max.y, s->idx);
+    if (TRACE){
+        printf(GREEN "SET " CLEAR "%s %d %zd bytes", key, (int)s->idx, sdslen(val));
+        if (res){
+            printf(GREEN " OK" CLEAR);
+        } else{
+            printf(RED " FAIL" CLEAR);
+        }
+        int count = rtreeCount(s->tr);
+        printf(" %d item", count);
+        if (count!=1){
+            printf("s");
+        }
+        printf("\n");
+    }
+    return res;
+}
+
+/* robjSpatialNewHash creates a new spatial object with an existing hash.
+ * This is is called from rdbLoad(). */
+void *robjSpatialNewHash(void *o){
+    robj *so = createSpatialObject();
+    spatial *s = so->ptr;
+    freeHashObject(s->h);
+    s->h = o;
+    hashTypeConvert(s->h, OBJ_ENCODING_HT);
+
+    /* Iterate through the hash and index all objects. */
+    hashTypeIterator *hi = hashTypeInitIterator(s->h);
+    while (hashTypeNext(hi) != C_ERR) {
+        sds key = hashTypeCurrentFromHashTable(hi, OBJ_HASH_KEY);
+        sds val = hashTypeCurrentFromHashTable(hi, OBJ_HASH_VALUE);
+        spatialSetValue(s, key, val);
+    }
+    return so;
+}
+
+void spatialFree(spatial *s){
+    if (s){
+        printf("released\n");
+        if (s->h){
+            freeHashObject(s->h);
+        }
+        if (s->keyhash){
+            freeHashObject(s->keyhash);
+        }
+        if (s->idxhash){
+            freeHashObject(s->idxhash);
+        }
+        if (s->tr){
+            rtreeFree(s->tr);   
+        }
+        zfree(s);
+    }
+}
+
+robj *spatialTypeLookupWriteOrCreate(client *c, robj *key) {
+    robj *o = lookupKeyWrite(c->db,key);
+    if (o == NULL) {
+        o = createSpatialObject();
+        dbAdd(c->db,key,o);
+    } else {
+        if (o->type != OBJ_SPATIAL) {
+            addReply(c,shared.wrongtypeerr);
+            return NULL;
+        }
+    }
+    return o;
+}
+
+
+
+//
+//
+//
+//
+//
+
+
 /* Importing some stuff from t_hash.c but these should exist in server.h */
 #define HASH_SET_TAKE_FIELD (1<<0)
 #define HASH_SET_TAKE_VALUE (1<<1)
 #define HASH_SET_COPY 0
-
-int hashTypeSet(robj *o, sds field, sds value, int flags);
-void hashTypeTryConversion(robj *o, robj **argv, int start, int end);
-sds hashTypeGetFromHashTable(robj *o, sds field);
-size_t hashTypeGetValueLength(robj *o, sds field);
 
 
 static void addGeomReplyBulkCBuffer(client *c, const void *p, size_t len) {
@@ -258,108 +449,6 @@ cleanup:
     listRelease(keys);
 }
 
-
-
-
-struct spatial {
-    robj *h;
-    rtree *tr;
-};
-
-static robj *spatialGetHash(robj *o){
-    return ((spatial*)o->ptr)->h;
-}
-
-void *robjSpatialGetHash(void *o){
-    return spatialGetHash((robj*)o);
-}
-
-
-spatial *spatialNew(){
-    spatial *s = zcalloc(sizeof(spatial));
-    if (!s){
-        goto err;
-    }
-    s->h = createHashObject();
-    if (!s->h){
-        goto err;
-    }
-    hashTypeConvert(s->h, OBJ_ENCODING_HT);
-    s->tr = rtreeNew();
-    if (!s->tr){
-        goto err;
-    }
-    return s;
-err:
-    spatialFree(s);
-    return NULL;
-}
-
-static int spatialDelValue(spatial *s, sds key){
-    geom g = dictFetchValue(s->h->ptr, key);
-    if (!g){
-        return 1;
-    }
-    geomRect r = geomBounds(g);
-    int res = rtreeRemove(s->tr, r.min.x, r.min.y, r.max.x, r.max.y, g);
-    return res;
-}
-
-static int spatialSetValue(spatial *s, sds key, sds val){
-    spatialDelValue(s, key);
-    geom g = (geom)val;
-    geomRect r = geomBounds(g);
-    int res = rtreeInsert(s->tr, r.min.x, r.min.y, r.max.x, r.max.y, val);
-    return res;
-}
-
-/* robjSpatialNewHash creates a new spatial object with an existing hash.
- * This is is called from rdbLoad(). */
-void *robjSpatialNewHash(void *o){
-    robj *so = createSpatialObject();
-    spatial *s = so->ptr;
-    freeHashObject(s->h);
-    s->h = o;
-    hashTypeConvert(s->h, OBJ_ENCODING_HT);
-
-    /* Iterate through the hash and index all objects. */
-    hashTypeIterator *hi = hashTypeInitIterator(s->h);
-    while (hashTypeNext(hi) != C_ERR) {
-        sds key = hashTypeCurrentFromHashTable(hi, OBJ_HASH_KEY);
-        sds val = hashTypeCurrentFromHashTable(hi, OBJ_HASH_VALUE);
-        spatialSetValue(s, key, val);
-    }
-    return so;
-}
-
-void spatialFree(spatial *s){
-    if (s){
-        printf("released\n");
-        if (s->h){
-            freeHashObject(s->h);
-        }
-        if (s->tr){
-            rtreeFree(s->tr);   
-        }
-        zfree(s);
-    }
-}
-
-robj *spatialTypeLookupWriteOrCreate(client *c, robj *key) {
-    robj *o = lookupKeyWrite(c->db,key);
-    if (o == NULL) {
-        o = createSpatialObject();
-        dbAdd(c->db,key,o);
-    } else {
-        if (o->type != OBJ_SPATIAL) {
-            addReply(c,shared.wrongtypeerr);
-            return NULL;
-        }
-    }
-    return o;
-}
-
-
 /* ====================================================================
  * Commands
  * ==================================================================== */
@@ -367,25 +456,21 @@ robj *spatialTypeLookupWriteOrCreate(client *c, robj *key) {
 void gsetCommand(client *c) {
     int update;
     robj *o, *h;
-    
+    if ((o = spatialTypeLookupWriteOrCreate(c,c->argv[1])) == NULL) return;
+    spatial *s = o->ptr;
+    h = spatialGetHash(o);
     geom g = NULL;
     int sz = 0;
     geomErr err = geomDecode(c->argv[3]->ptr, sdslen(c->argv[3]->ptr), 0, &g, &sz);
     if (err!=GEOM_ERR_NONE){
         addReplyError(c,"invalid geometry");
-        return;        
+        return;
     }
-    decrRefCount(c->argv[3]);
-    c->argv[3] = createRawStringObject((char*)g, sz);
+    sds value = sdsnewlen(g, sz);
     geomFree(g);
-    if ((o = spatialTypeLookupWriteOrCreate(c,c->argv[1])) == NULL) return;
-    spatial *s = o->ptr;
-    h = spatialGetHash(o);
-    hashTypeTryConversion(h,c->argv,2,3);
-    spatialSetValue(s,c->argv[2]->ptr,c->argv[3]->ptr);
-    update = hashTypeSet(h,c->argv[2]->ptr,c->argv[3]->ptr,HASH_SET_TAKE_FIELD|HASH_SET_TAKE_VALUE);
-    c->argv[2] = createRawStringObject("", 0); // assign empty.
-    c->argv[3] = createRawStringObject("", 0); // assign empty.
+    spatialSetValue(s, c->argv[2]->ptr, value);
+    update = hashTypeSet(h,c->argv[2]->ptr,value, HASH_SET_COPY);
+    sdsfree(value);
     addReply(c, update ? shared.czero : shared.cone);
     signalModifiedKey(c->db,c->argv[1]);
     notifyKeyspaceEvent(NOTIFY_HASH,"gset",c->argv[1],c->db->id);
@@ -427,7 +512,7 @@ void gdelCommand(client *c) {
     spatial *s = o->ptr;
 
     for (j = 2; j < c->argc; j++) {
-        spatialDelValue(s, c->argv[j]->ptr);
+        spatialDelValue(s, c->argv[j]->ptr, NULL);
         if (hashTypeDelete(h,c->argv[j]->ptr)) {
             deleted++;
             if (hashTypeLength(h) == 0) {
@@ -472,7 +557,6 @@ void gsetnxCommand(client *c) {
     if ((o = spatialTypeLookupWriteOrCreate(c,c->argv[1])) == NULL) return;
     spatial *s = o->ptr;
     h = spatialGetHash(o);
-    hashTypeTryConversion(h,c->argv,2,3);
 
     if (hashTypeExists(h, c->argv[2]->ptr)) {
         addReply(c, shared.czero);
@@ -484,19 +568,18 @@ void gsetnxCommand(client *c) {
             addReplyError(c,"invalid geometry");
             return;
         }
-        decrRefCount(c->argv[3]);
-        c->argv[3] = createRawStringObject((char*)g, sz);
+        sds value = sdsnewlen(g, sz);
         geomFree(g);
-        spatialSetValue(s, c->argv[2]->ptr,c->argv[3]->ptr);
-        hashTypeSet(h,c->argv[2]->ptr,c->argv[3]->ptr,HASH_SET_TAKE_FIELD|HASH_SET_TAKE_VALUE);
-        c->argv[2] = createRawStringObject("", 0); // assign empty.
-        c->argv[3] = createRawStringObject("", 0); // assign empty.
+        spatialSetValue(s, c->argv[2]->ptr, value);
+        hashTypeSet(h,c->argv[2]->ptr,value,HASH_SET_COPY);
+        sdsfree(value);
         addReply(c, shared.cone);
         signalModifiedKey(c->db,c->argv[1]);
         notifyKeyspaceEvent(NOTIFY_HASH,"gset",c->argv[1],c->db->id);
         server.dirty++;
     }
 }
+
 
 void gmsetCommand(client *c) {
     int i;
@@ -508,22 +591,19 @@ void gmsetCommand(client *c) {
     if ((o = spatialTypeLookupWriteOrCreate(c,c->argv[1])) == NULL) return;
     spatial *s = o->ptr;
     h = spatialGetHash(o);
-    hashTypeTryConversion(h,c->argv,2,c->argc-1);
     for (i = 2; i < c->argc; i += 2) {
         geom g = NULL;
         int sz = 0;
-        geomErr err = geomDecode(c->argv[i+1]->ptr, sdslen(c->argv[i+1]->ptr), 0, &g, &sz);
+        geomErr err = geomDecode(c->argv[i+0]->ptr, sdslen(c->argv[i+1]->ptr), 0, &g, &sz);
         if (err!=GEOM_ERR_NONE){
             addReplyError(c,"invalid geometry");
             return;
         }
-        decrRefCount(c->argv[i+1]);
-        c->argv[i+1] = createRawStringObject((char*)g, sz);
+        sds value = sdsnewlen(g, sz);
         geomFree(g);
-        spatialSetValue(s,c->argv[i]->ptr,c->argv[i+1]->ptr);
-        hashTypeSet(h,c->argv[i+0]->ptr,c->argv[i+1]->ptr,HASH_SET_TAKE_FIELD|HASH_SET_TAKE_VALUE);
-        c->argv[i+0] = createRawStringObject("", 0); // assign empty.
-        c->argv[i+1] = createRawStringObject("", 0); // assign empty.
+        spatialSetValue(s, c->argv[i+0]->ptr, value);
+        hashTypeSet(h,c->argv[i+0]->ptr,value,HASH_SET_COPY);
+        sdsfree(value);
     }
     addReply(c, shared.ok);
     signalModifiedKey(c->db,c->argv[1]);
@@ -626,11 +706,12 @@ typedef struct searchContext {
     int cap;
     resultItem *results;
 
-
-    geomRect r;
+    // bounds
+    geomRect bounds;
 
     // radius
-    double lat, lon, meters;
+    geomCoord center;
+    double meters;
 
     // geometry
     geom g;
@@ -638,12 +719,51 @@ typedef struct searchContext {
 } searchContext;
 
 static int searchIterator(double minX, double minY, double maxX, double maxY, void *item, void *userdata){
+    (void)(minX);(void)(minY);(void)(maxX);(void)(maxY); // unused vars.
+
     searchContext *ctx = userdata;
-    geom g = dictFetchValue(ctx->s->h->ptr, (sds)item);
-    if (!g){
-        addReplyError(ctx->c, "index/dict mismatch");
-        ctx->fail = 1;
-        return 0;
+
+    // retreive the key
+    uint64_t nidx = (uint64_t)item;
+    sds sidx = sdsnewlen(&nidx, 8);
+    sds key = hashTypeGetFromHashTable(ctx->s->idxhash, sidx);
+    sdsfree(sidx);
+
+    if (TRACE){
+        printf(MAGENTA "FOUND" CLEAR);
+        printf(" %s %llu", key, nidx);
+        printf("\n");
+    }
+
+    // retreive the geom
+    sds value = hashTypeGetFromHashTable(ctx->s->h, key);
+    geom g = (geom)value;
+    int match = 0;
+    switch (ctx->targetType){
+    case RADIUS:
+        if (ctx->searchType==WITHIN){
+            match = geomWithinRadius(g, ctx->center, ctx->meters);
+        } else {
+            match = geomIntersectsRadius(g, ctx->center, ctx->meters);            
+        }
+        break;
+    case GEOMETRY:
+        if (ctx->searchType==WITHIN){
+            match = geomWithin(g, ctx->g);
+        } else {
+            match = geomIntersects(g, ctx->g);
+        }
+        break;
+    case BOUNDS:
+        if (ctx->searchType==WITHIN){
+            match = geomWithinBounds(g, ctx->bounds);
+        } else {
+            match = geomIntersectsBounds(g, ctx->bounds);
+        }
+        break;
+    }
+    if (!match){
+        return 1;
     }
 
     // append item
@@ -663,24 +783,9 @@ static int searchIterator(double minX, double minY, double maxX, double maxY, vo
         ctx->results = nresults;
         ctx->cap = ncap;
     }
-    ctx->results[ctx->len].field = (sds)item;
-    ctx->results[ctx->len].value = (sds)g;
+    ctx->results[ctx->len].field = key;    // gets released on reply
+    ctx->results[ctx->len].value = value;  // gets released on reply
     ctx->len++;
-
-
-    //geomRect r = geomBounds(g);
-
-
-
-    // switch (ctx->targetType){
-
-
-    // }
-    // double lat = (maxY-minY)/2+minY;
-    // double lon = (maxX-minX)/2+minX;
-    // if (geoutilDistance(ctx->lat, ctx->lon, lat, lon) <= ctx->meters){
-    //     //ctx->count++;
-    // }
     return 1;
 }
 
@@ -705,15 +810,15 @@ void gsearchCommand(client *c){
             addReplyError(c, "need longitude, latitude, meters");
             return;
         }
-        if (getDoubleFromObjectOrReply(c, c->argv[i+1], &ctx.lon, "need numeric longitude") != C_OK) return;
-        if (getDoubleFromObjectOrReply(c, c->argv[i+2], &ctx.lat, "need numeric latitude") != C_OK) return;
+        if (getDoubleFromObjectOrReply(c, c->argv[i+1], &ctx.center.x, "need numeric longitude") != C_OK) return;
+        if (getDoubleFromObjectOrReply(c, c->argv[i+2], &ctx.center.y, "need numeric latitude") != C_OK) return;
         if (getDoubleFromObjectOrReply(c, c->argv[i+3], &ctx.meters, "need numeric meters") != C_OK) return;
-        if (ctx.lon < -180 || ctx.lon > 180 || ctx.lat < -90 || ctx.lat > 90){
+        if (ctx.center.x < -180 || ctx.center.x > 180 || ctx.center.y < -90 || ctx.center.y > 90){
             addReplyError(c, "invalid longitude/latitude pair");
             return;
         }
         ctx.targetType = RADIUS;
-        ctx.r = geoutilBoundsFromLatLon(ctx.lat, ctx.lon, ctx.meters);
+        ctx.bounds = geoutilBoundsFromLatLon(ctx.center.y, ctx.center.x, ctx.meters);
         i+=4;
     } else if (strieq(c->argv[i]->ptr, "geom") || strieq(c->argv[i]->ptr, "geometry")){
         if (i==c->argc-1){
@@ -730,19 +835,19 @@ void gsearchCommand(client *c){
         ctx.g = g;
         ctx.sz = sz;
         ctx.targetType = GEOMETRY;
-        ctx.r = geomBounds(ctx.g);
+        ctx.bounds = geomBounds(ctx.g);
         i+=2;
     } else if (strieq(c->argv[i]->ptr, "bounds")){
         if (i>=c->argc-4){
             addReplyError(c, "need min longitude, min latitude, max longitude, max latitude");
             return;
         }
-        if (getDoubleFromObjectOrReply(c, c->argv[i+1], &ctx.r.min.x, "need numeric min longitude") != C_OK) return;
-        if (getDoubleFromObjectOrReply(c, c->argv[i+2], &ctx.r.min.y, "need numeric min latitude") != C_OK) return;
-        if (getDoubleFromObjectOrReply(c, c->argv[i+3], &ctx.r.max.x, "need numeric max longitude") != C_OK) return;
-        if (getDoubleFromObjectOrReply(c, c->argv[i+4], &ctx.r.max.y, "need numeric max latitude") != C_OK) return;
-        if ((ctx.r.min.x < -180 || ctx.r.min.x > 180 || ctx.r.min.y < -90 || ctx.r.min.y > 90)||
-            (ctx.r.max.x < -180 || ctx.r.max.x > 180 || ctx.r.max.y < -90 || ctx.r.max.y > 90)){
+        if (getDoubleFromObjectOrReply(c, c->argv[i+1], &ctx.bounds.min.x, "need numeric min longitude") != C_OK) return;
+        if (getDoubleFromObjectOrReply(c, c->argv[i+2], &ctx.bounds.min.y, "need numeric min latitude") != C_OK) return;
+        if (getDoubleFromObjectOrReply(c, c->argv[i+3], &ctx.bounds.max.x, "need numeric max longitude") != C_OK) return;
+        if (getDoubleFromObjectOrReply(c, c->argv[i+4], &ctx.bounds.max.y, "need numeric max latitude") != C_OK) return;
+        if ((ctx.bounds.min.x < -180 || ctx.bounds.min.x > 180 || ctx.bounds.min.y < -90 || ctx.bounds.min.y > 90)||
+            (ctx.bounds.max.x < -180 || ctx.bounds.max.x > 180 || ctx.bounds.max.y < -90 || ctx.bounds.max.y > 90)){
             addReplyError(c, "invalid longitude/latitude pairs");
             return;
         }
@@ -757,14 +862,22 @@ void gsearchCommand(client *c){
         goto done;
     }
     ctx.s = o->ptr;
-
-    rtreeSearch(ctx.s->tr, ctx.r.min.x, ctx.r.min.y, ctx.r.max.x, ctx.r.max.y, searchIterator, &ctx);
-    printf("%d\n", ctx.len);
+    rtreeSearch(ctx.s->tr, ctx.bounds.min.x, ctx.bounds.min.y, ctx.bounds.max.x, ctx.bounds.max.y, searchIterator, &ctx);
     if (!ctx.fail){
         // return results
-        addReplyMultiBulkLen(c, 0);
-        //addReplyBulkLongLong(c,cursor);
-
+        addReplyMultiBulkLen(c, 2);
+        addReplyBulkLongLong(c, 0); // future cursor support
+        addReplyMultiBulkLen(c, ctx.len*2);
+        for (int i=0;i<ctx.len;i++){
+            addReplyBulkCBuffer(c, ctx.results[i].field, sdslen(ctx.results[i].field));
+            char *wkt = geomEncodeWKT((geom)ctx.results[i].value, 0);
+            if (!wkt){
+                addReplyBulkCBuffer(c, "", 0);
+            } else {
+                addReplyBulkCBuffer(c, wkt, strlen(wkt));
+                geomFreeWKT(wkt);
+            }
+        }
     }
 done:
     if (ctx.g){

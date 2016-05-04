@@ -22,7 +22,7 @@ test: all
 
 .PHONY: all
 
-geom.o: geom.h geom.c geom_levels.c
+geom.o: geom.h geom.c geom_levels.c geom_intersects.c geom_within.c
 grisu3.o: grisu3.h grisu3.c
 rtree.o: rtree.h rtree.c rtree_tmpl.c
 geoutil.o: geoutil.h geoutil.c

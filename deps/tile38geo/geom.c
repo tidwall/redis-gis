@@ -33,6 +33,8 @@
 #include <stdint.h>
 #include "geom.h"
 #include "grisu3.h"
+#include "geoutil.h"
+#include "poly.h"
 
 static geomErr geomDecodeWKTInner(const char *input, geomWKTDecodeOpts opts, geom *g, int *size, int *read);
 
@@ -990,6 +992,8 @@ int geomRectString(geomRect r, int withZ, int withM, char *str){
 
 #define FROM_GEOM_C
 #include "geom_levels.c"
+#include "geom_within.c"
+#include "geom_intersects.c"
 
 
 // geomGetCoord return any coord that is contained somewhere within the specified geometry.

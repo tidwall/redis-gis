@@ -55,8 +55,6 @@ geo.o: geo.c geo.h server.h fmacros.h config.h solarisfixes.h \
  adlist.h zmalloc.h anet.h ziplist.h intset.h version.h util.h latency.h \
  sparkline.h quicklist.h zipmap.h sha1.h endianconv.h crc64.h rdb.h rio.h \
  ../deps/geohash-int/geohash_helper.h ../deps/geohash-int/geohash.h
-spatial.o: spatial.c spatial.h server.h \
- ../deps/tile38geo/geom.h ../deps/tile38geo/rtree.h ../deps/tile38geo/geoutil.h ../deps/tile38geo/geoutil.c
 hyperloglog.o: hyperloglog.c server.h fmacros.h config.h solarisfixes.h \
  ../deps/lua/src/lua.h ../deps/lua/src/luaconf.h ae.h sds.h dict.h \
  adlist.h zmalloc.h anet.h ziplist.h intset.h version.h util.h latency.h \
@@ -157,6 +155,12 @@ sparkline.o: sparkline.c server.h fmacros.h config.h solarisfixes.h \
  ../deps/lua/src/lua.h ../deps/lua/src/luaconf.h ae.h sds.h dict.h \
  adlist.h zmalloc.h anet.h ziplist.h intset.h version.h util.h latency.h \
  sparkline.h quicklist.h zipmap.h sha1.h endianconv.h crc64.h rdb.h rio.h
+spatial.o: spatial.c spatial.h server.h \
+ ../deps/tile38geo/geom.h ../deps/tile38geo/rtree.h \
+ ../deps/tile38geo/geoutil.h ../deps/tile38geo/poly.h \
+ ../deps/tile38geo/geom.c ../deps/tile38geo/geom_intersects.c \
+ ../deps/tile38geo/geom_levels.c ../deps/tile38geo/geom_within.c \
+ ../deps/tile38geo/geoutil.c ../deps/tile38geo/rtree.c
 syncio.o: syncio.c server.h fmacros.h config.h solarisfixes.h \
  ../deps/lua/src/lua.h ../deps/lua/src/luaconf.h ae.h sds.h dict.h \
  adlist.h zmalloc.h anet.h ziplist.h intset.h version.h util.h latency.h \
