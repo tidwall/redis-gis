@@ -101,11 +101,12 @@ geomRect geomBounds(geom g);
 // geom search functions.
 int geomWithin(geom g, geom target);
 int geomIntersects(geom g, geom target);
-int geomWithinRadius(geom g, geomCoord center, double meters);
-int geomIntersectsRadius(geom g, geomCoord center, double meters);
+int geomWithinRadius(geom g, geomCoord center, double meters, geom circlePolygon);
+int geomIntersectsRadius(geom g, geomCoord center, double meters, geom circlePolygon);
 int geomWithinBounds(geom g, geomRect bounds);
 int geomIntersectsBounds(geom g, geomRect bounds);
 
+geom geomNewCirclePolygon(geomCoord center, double meters, int steps);
 
 
 #if defined(__cplusplus)

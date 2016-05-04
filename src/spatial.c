@@ -594,7 +594,7 @@ void gmsetCommand(client *c) {
     for (i = 2; i < c->argc; i += 2) {
         geom g = NULL;
         int sz = 0;
-        geomErr err = geomDecode(c->argv[i+0]->ptr, sdslen(c->argv[i+1]->ptr), 0, &g, &sz);
+        geomErr err = geomDecode(c->argv[i+1]->ptr, sdslen(c->argv[i+1]->ptr), 0, &g, &sz);
         if (err!=GEOM_ERR_NONE){
             addReplyError(c,"invalid geometry");
             return;
@@ -742,9 +742,9 @@ static int searchIterator(double minX, double minY, double maxX, double maxY, vo
     switch (ctx->targetType){
     case RADIUS:
         if (ctx->searchType==WITHIN){
-            match = geomWithinRadius(g, ctx->center, ctx->meters);
+            match = geomWithinRadius(g, ctx->center, ctx->meters, ctx->g);
         } else {
-            match = geomIntersectsRadius(g, ctx->center, ctx->meters);            
+            match = geomIntersectsRadius(g, ctx->center, ctx->meters, ctx->g);            
         }
         break;
     case GEOMETRY:
@@ -819,6 +819,7 @@ void gsearchCommand(client *c){
         }
         ctx.targetType = RADIUS;
         ctx.bounds = geoutilBoundsFromLatLon(ctx.center.y, ctx.center.x, ctx.meters);
+        ctx.g = geomNewCirclePolygon(ctx.center, ctx.meters, 12);
         i+=4;
     } else if (strieq(c->argv[i]->ptr, "geom") || strieq(c->argv[i]->ptr, "geometry")){
         if (i==c->argc-1){

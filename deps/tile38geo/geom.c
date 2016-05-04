@@ -1073,3 +1073,33 @@ geomErr geomDecode(const void *input, size_t length, geomWKTDecodeOpts opts, geo
     return GEOM_ERR_INPUT;
 }
 
+// CirclePolygon returns a Polygon around the radius.
+geom geomNewCirclePolygon(geomCoord center, double meters, int steps){
+    if (steps < 3) {
+        steps = 3;
+    }
+    int sz = ((steps+1)*16)+13; // exact byte count
+    uint8_t *b = malloc(sz);
+    if (!b){
+        return NULL;
+    }
+    if (LITTLE_ENDIAN){
+        b[0] = 0x01;
+    } else{
+        b[0] = 0x00;
+    }
+    *((uint32_t*)(b+1)) = 3;
+    *((uint32_t*)(b+5)) = 1;
+    *((uint32_t*)(b+9)) = steps+1;
+    geomCoord p = {0,0,0,0};
+    double step = 360.0 / (double)steps;
+    int i = 0;
+    for (double deg=0;deg<360.0;deg+=step) {
+        geoutilDestinationLatLon(center.y, center.x, meters, deg, &p.y, &p.x);
+        *((double*)(b+13+(i*16)+0)) = p.x;
+        *((double*)(b+13+(i*16)+8)) = p.y;
+        i++;
+    }
+    return (geom)b;
+}
+
