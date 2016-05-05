@@ -478,8 +478,10 @@ int test_GeomGeometryCollection(){
         "MULTIPOINT(10 11, 12 13, 14 15),"
         "POLYGON((101 111, 121 131, 141 151),(9 8, 12 13))"
     ")", "10 11 0 0,141 151 0 0");
+    return 1;
+}
 
-
+int test_GeomIterator(){
     char *input = 
         "GEOMETRYCOLLECTION ("
             "POINT Z(10 11 12),"

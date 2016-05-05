@@ -44,6 +44,7 @@ int test_GeomMultiLineString();
 int test_GeomPolygon();
 int test_GeomMultiPolygon();
 int test_GeomGeometryCollection();
+int test_GeomIterator();
 int test_RTreeInsert();
 int test_RTreeSearch();
 int test_RTreeRemove();
@@ -56,6 +57,7 @@ int test_PolyIntersectsLines();
 int test_PolyIntersectsShapes();
 int test_PolyRectIntersects();
 int test_PolyRectInside();
+
 
 
 
@@ -75,6 +77,7 @@ test tests[] = {
 	{ "geomPolygon", test_GeomPolygon },
 	{ "geomMultiPolygon", test_GeomMultiPolygon },
 	{ "geomGeometryCollection", test_GeomGeometryCollection },
+	{ "geomIterator", test_GeomIterator },
 	{ "rtreeInsert", test_RTreeInsert },
 	{ "rtreeSearch", test_RTreeSearch },
 	{ "rtreeRemove", test_RTreeRemove },
