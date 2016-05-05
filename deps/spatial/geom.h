@@ -101,7 +101,7 @@ int geomIsSimplePoint(geom g);
 
 
 typedef struct geomIterator geomIterator;
-geomIterator *geomNewGeometryCollectionIterator(geom g);
+geomIterator *geomNewGeometryCollectionIterator(geom g, int flatten);
 int geomIteratorNext(geomIterator *itr);
 void geomFreeIterator(geomIterator *itr);
 int geomIteratorValues(geomIterator *itr, geom *g, int *sz);

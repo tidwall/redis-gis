@@ -497,37 +497,38 @@ int test_GeomGeometryCollection(){
             "POINT ZM(10 11 12 13)"
         ")";
 
-    int count = 0;
-    geom g;
-    int sz;
-    geomErr err = geomDecode(input, strlen(input), 0, &g, &sz);
-    assert(err == GEOM_ERR_NONE);
-
-//    printf("\n");
-
-    geomIterator *itr = geomNewGeometryCollectionIterator(g);
-    assert(itr);
-    while (geomIteratorNext(itr)){
-        geom ig;
+    for (int i=0;i<2;i++){
+        int count = 0;
+        geom g;
         int sz;
-        assert(geomIteratorValues(itr, &ig, &sz));
-        if (geomGetType(ig) == GEOM_GEOMETRYCOLLECTION){
-            geomIterator *itr2 = geomNewGeometryCollectionIterator(ig);
-            assert(itr2);
-            while (geomIteratorNext(itr2)){
-                geom ig2;
-                int sz2;
-                assert(geomIteratorValues(itr2, &ig2, &sz2));
-                //printf("  geom! %d bytes\n", sz2);
-                count++;
+        geomErr err = geomDecode(input, strlen(input), 0, &g, &sz);
+        assert(err == GEOM_ERR_NONE);
+        geomIterator *itr = geomNewGeometryCollectionIterator(g, i);
+        assert(itr);
+        while (geomIteratorNext(itr)){
+            geom ig;
+            int sz;
+            assert(geomIteratorValues(itr, &ig, &sz));
+            if (geomGetType(ig) == GEOM_GEOMETRYCOLLECTION){
+                geomIterator *itr2 = geomNewGeometryCollectionIterator(ig, 0);
+                assert(itr2);
+                while (geomIteratorNext(itr2)){
+                    geom ig2;
+                    int sz2;
+                    assert(geomIteratorValues(itr2, &ig2, &sz2));
+                    count++;
+                }
+                geomFreeIterator(itr2);        
             }
-            geomFreeIterator(itr2);        
+            count++;
         }
-        //printf("geom! %d bytes\n", sz);
-        count++;
+        geomFreeIterator(itr);
+        if (i==0){
+            assert(count==12);
+        }else{
+            assert(count==11);
+        }
     }
-    geomFreeIterator(itr);
-    assert(count==12);
     return 1;
 }
 

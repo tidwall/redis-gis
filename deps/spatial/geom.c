@@ -1116,14 +1116,21 @@ int geomIsSimplePoint(geom g){
 typedef struct geomIterator {
     ghdr hdr;
     int count;
-    int idx;
     uint8_t *ptr;
     geom g;
     int sz;
+    int flatten;
 
+    int idx;
+    int len;
+    int cap;
+    geom *fg;
+    int *fsz;
+    int fon;
 } geomIterator;
 
-geomIterator *geomNewGeometryCollectionIterator(geom g){
+// when the flatten argument is provided the iterator will flatten nested collections.
+geomIterator *geomNewGeometryCollectionIterator(geom g, int flatten){
     if (!g){
         return NULL;
     }
@@ -1144,6 +1151,7 @@ geomIterator *geomNewGeometryCollectionIterator(geom g){
     itr->hdr = h;
     itr->count = count; 
     itr->ptr = ptr;
+    itr->flatten = flatten?1:0;
     return itr;
 }
 
@@ -1152,10 +1160,18 @@ int geomIteratorValues(geomIterator *itr, geom *g, int *sz){
         return 0;
     }
     if (g){
-        *g = itr->g;
+        if (itr->idx<itr->len){
+            *g = itr->fg[itr->idx];
+        } else {
+            *g = itr->g;
+        }
     }
     if (sz){
-        *sz = itr->sz;
+        if (itr->idx<itr->len){
+            *sz = itr->fsz[itr->idx];
+        } else {
+            *sz = itr->sz;
+        }
     }
     return 1;
 }
@@ -1163,6 +1179,10 @@ int geomIteratorValues(geomIterator *itr, geom *g, int *sz){
 int geomIteratorNext(geomIterator *itr){
     if (!itr){
         return 0;
+    }
+    if (itr->idx<itr->len-1){
+        itr->idx++;
+        return 1;
     }
     if (!itr->count){
         return 0;
@@ -1186,11 +1206,41 @@ int geomIteratorNext(geomIterator *itr){
     switch(h.type){
     case GEOM_GEOMETRYCOLLECTION:{
         // nested geometry collection. but hey why not...
-        geomIterator *itr2 = geomNewGeometryCollectionIterator((geom)optr);
+        geomIterator *itr2 = geomNewGeometryCollectionIterator((geom)optr, 0);
         if (!itr2){
             return 0;
         }
-        while (geomIteratorNext(itr2));
+        if (itr->flatten){
+            itr->len = 0;
+            itr->idx = 0;
+            itr->fon = 1;
+        }
+        while (geomIteratorNext(itr2)){
+            if (itr->flatten){
+                if (itr->len==itr->cap){
+                    int ncap = itr->cap;
+                    if (ncap==1){
+                        ncap=1;
+                    }else{
+                        ncap*=2;
+                    }
+                    geom *nfg = realloc(itr->fg, ncap*sizeof(geom));
+                    if (!nfg){
+                        return 0;
+                    } 
+                    itr->fg = nfg;
+                    int *nfsz = realloc(itr->fsz, ncap*sizeof(int));
+                    if (!nfsz){
+                        return 0;
+                    } 
+                    itr->fsz = nfsz;
+                    itr->cap = ncap;
+                }
+                itr->fg[itr->len] = itr2->g;
+                itr->fsz[itr->len] = itr2->sz;
+                itr->len++;
+            }
+        }
         itr->ptr = itr2->ptr;
         geomFreeIterator(itr2);
         break;
@@ -1240,6 +1290,12 @@ int geomIteratorNext(geomIterator *itr){
 void geomFreeIterator(geomIterator *itr){
     if (!itr){
         return;
+    }
+    if (itr->fg){
+        free(itr->fg);
+    }
+    if (itr->fsz){
+        free(itr->fsz);
     }
     free(itr);
 }
