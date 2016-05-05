@@ -45,6 +45,7 @@ int test_GeomPolygon();
 int test_GeomMultiPolygon();
 int test_GeomGeometryCollection();
 int test_GeomIterator();
+int test_GeomPolyMap();
 int test_RTreeInsert();
 int test_RTreeSearch();
 int test_RTreeRemove();
@@ -78,6 +79,7 @@ test tests[] = {
 	{ "geomMultiPolygon", test_GeomMultiPolygon },
 	{ "geomGeometryCollection", test_GeomGeometryCollection },
 	{ "geomIterator", test_GeomIterator },
+	{ "geomPolyMap", test_GeomPolyMap },
 	{ "rtreeInsert", test_RTreeInsert },
 	{ "rtreeSearch", test_RTreeSearch },
 	{ "rtreeRemove", test_RTreeRemove },
@@ -107,8 +109,12 @@ void sig_handler(int sig) {
 			printf("    \x1b[33muse \"test.h\" for more details.\x1b[0m\n");
 		}
 		abort_handled = 1;
+	}else {
+		printf("\x1b[0m\n");
 	}
-	printf("\x1b[0m\n");
+	if (sig == SIGSEGV){
+		printf("Segmentation fault: 11\n");
+	}
 	exit(1);
 }
 

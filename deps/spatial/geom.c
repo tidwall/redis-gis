@@ -994,7 +994,7 @@ int geomRectString(geomRect r, int withZ, int withM, char *str){
 #include "geom_levels.c"
 #include "geom_within.c"
 #include "geom_intersects.c"
-#include "geom_map.c"
+#include "geom_polymap.c"
 
 
 // geomGetCoord return any coord that is contained somewhere within the specified geometry.
@@ -1120,7 +1120,6 @@ typedef struct geomIterator {
     uint8_t *ptr;
     geom g;
     int sz;
-    int flatten;
 
     int idx;
     int len;
@@ -1130,8 +1129,7 @@ typedef struct geomIterator {
     int fon;
 } geomIterator;
 
-// when the flatten argument is provided the iterator will flatten nested collections.
-geomIterator *geomNewGeometryCollectionIterator(geom g, int flatten){
+geomIterator *geomNewGeometryCollectionIterator(geom g){
     if (!g){
         return NULL;
     }
@@ -1152,7 +1150,6 @@ geomIterator *geomNewGeometryCollectionIterator(geom g, int flatten){
     itr->hdr = h;
     itr->count = count; 
     itr->ptr = ptr;
-    itr->flatten = flatten?1:0;
     return itr;
 }
 
@@ -1161,18 +1158,10 @@ int geomIteratorValues(geomIterator *itr, geom *g, int *sz){
         return 0;
     }
     if (g){
-        if (itr->idx<itr->len){
-            *g = itr->fg[itr->idx];
-        } else {
-            *g = itr->g;
-        }
+        *g = itr->g;
     }
     if (sz){
-        if (itr->idx<itr->len){
-            *sz = itr->fsz[itr->idx];
-        } else {
-            *sz = itr->sz;
-        }
+        *sz = itr->sz;
     }
     return 1;
 }
@@ -1180,10 +1169,6 @@ int geomIteratorValues(geomIterator *itr, geom *g, int *sz){
 int geomIteratorNext(geomIterator *itr){
     if (!itr){
         return 0;
-    }
-    if (itr->idx<itr->len-1){
-        itr->idx++;
-        return 1;
     }
     if (!itr->count){
         return 0;
@@ -1207,41 +1192,13 @@ int geomIteratorNext(geomIterator *itr){
     switch(h.type){
     case GEOM_GEOMETRYCOLLECTION:{
         // nested geometry collection. but hey why not...
-        geomIterator *itr2 = geomNewGeometryCollectionIterator((geom)optr, 0);
+        // we have to iterate through it in order to get to the end of it.
+        // sigh...
+        geomIterator *itr2 = geomNewGeometryCollectionIterator((geom)optr);
         if (!itr2){
             return 0;
         }
-        if (itr->flatten){
-            itr->len = 0;
-            itr->idx = 0;
-            itr->fon = 1;
-        }
-        while (geomIteratorNext(itr2)){
-            if (itr->flatten){
-                if (itr->len==itr->cap){
-                    int ncap = itr->cap;
-                    if (ncap==1){
-                        ncap=1;
-                    }else{
-                        ncap*=2;
-                    }
-                    geom *nfg = realloc(itr->fg, ncap*sizeof(geom));
-                    if (!nfg){
-                        return 0;
-                    } 
-                    itr->fg = nfg;
-                    int *nfsz = realloc(itr->fsz, ncap*sizeof(int));
-                    if (!nfsz){
-                        return 0;
-                    } 
-                    itr->fsz = nfsz;
-                    itr->cap = ncap;
-                }
-                itr->fg[itr->len] = itr2->g;
-                itr->fsz[itr->len] = itr2->sz;
-                itr->len++;
-            }
-        }
+        while (geomIteratorNext(itr2));
         itr->ptr = itr2->ptr;
         geomFreeIterator(itr2);
         break;
@@ -1304,7 +1261,7 @@ void geomFreeIterator(geomIterator *itr){
 geom *geomGeometryCollectionFlattenedArray(geom g, int *count){
     geom *gg = NULL;
     geomIterator *itr = NULL;
-    itr = geomNewGeometryCollectionIterator(g, 1);
+    itr = geomNewGeometryCollectionIterator(g);
     if (!itr){
         goto err;
     }
@@ -1319,16 +1276,35 @@ geom *geomGeometryCollectionFlattenedArray(geom g, int *count){
         if (!geomIteratorValues(itr, &ig, NULL)){
             goto err;
         }
-         if (len==cap){
-            int ncap = cap==0?1:cap*2;
-            geom *ngg = realloc(gg, ncap*sizeof(geom));
-            if (!ngg){
+        int release = 0;
+        geom *arr = &ig;
+        int arrn = 1;
+        if (geomGetType(ig) == GEOM_GEOMETRYCOLLECTION){
+            release = 1;
+            arr = geomGeometryCollectionFlattenedArray(ig, &arrn);
+            if (!arr){
                 goto err;
-            } 
-            gg = ngg;
-            cap = ncap;
+            }
         }
-        gg[len++] = ig;
+        for (int i=0;i<arrn;i++){
+            geom ig2 = arr[i];
+            if (len==cap){
+                int ncap = cap==0?1:cap*2;
+                geom *ngg = realloc(gg, ncap*sizeof(geom));
+                if (!ngg){
+                    if (release){
+                        geomFreeFlattenedArray(arr);
+                    }
+                    goto err;
+                } 
+                gg = ngg;
+                cap = ncap;
+            }
+            gg[len++] = ig2;
+        }
+        if (release){
+            geomFreeFlattenedArray(arr);
+        }
     }
     if (count){
         *count = len;

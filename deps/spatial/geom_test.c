@@ -481,60 +481,108 @@ int test_GeomGeometryCollection(){
     return 1;
 }
 
+
+int test_GeomPolyMap(){
+    char *input = 
+        "GEOMETRYCOLLECTION ("
+    /*  1 */    "POINT Z(10 11 12),"
+    /*  2 */    "MULTIPOINT(10 11, 12 13, 14 15),"
+    /*  3 */    "POLYGON((101 111, 121 131, 141 151),(9 8, 12 13)),"
+    /*  4 */    "POINTZM(10 11 12 13),"
+    /*  5 */    "POLYGON((10 11, 12 13, 14 15),(9 8, 12 13)),"
+    /*  6 */    "MULTIPOLYGON(((10 11, 12 13, 14 15),(9 8, 12 13))),"
+    /*  7 */    "MULTIPOINT(10 11, 12 13, 14 15),"
+    /*  8 */    "POLYGON((101 111, 121 131, 141 151)),"
+    /*    */    "GEOMETRYCOLLECTION ("
+    /*  9 */        "MULTIPOLYGON(((10 11, 12 13, 14 15),(9 8, 12 13))),"
+    /* 10 */        "MULTIPOINT(10 11, 12 13, 14 15),"
+    /*    */        "GEOMETRYCOLLECTION ("
+    /* 11 */            "MULTIPOLYGON(((10 11, 12 13, 14 15),(9 8, 12 13))),"
+    /* 12 */            "MULTIPOINT(10 11, 12 13, 14 15),"
+    /* 13 */            "POLYGON((101 111, 121 131, 141 151)),"
+    /* 14 */            "MULTIPOINT(10 11, 12 13, 14 15)"
+    /*    */        "),"
+    /* 15 */        "MULTIPOINT(10 11, 12 13, 14 15)"
+    /*    */    "),"
+    /* 16 */    "POINTZ(10 11 12),"
+    /* 17 */    "MULTIPOLYGON(((10 11, 12 13, 14 15),(9 8, 12 13))),"
+    /* 18 */    "LINESTRINGZ(10 11 9,12 13 8,14 15 7),"
+    /* 19 */    "LINESTRING ZM(10 11 9 100,12 13 8 101,14 15 7 102),"
+    /* 20 */    "MULTIPOLYGON EMPTY,"
+    /* 21 */    "MULTIPOLYGON(((10 11, 12 13, 14 15),(9 8, 12 13)),((9 8, 12 13))),"
+    /* 22 */    "POINT ZM(10 11 12 13)"
+        ")";
+    
+    geom g;
+    int sz;
+
+    // for (int i=0;;i++){
+    //     if (i==1000000){
+    //         return i;
+    //     }
+        geomErr err = geomDecode(input, strlen(input), 0, &g, &sz);
+        assert(err == GEOM_ERR_NONE);
+
+
+        geomPolyMap *m = geomNewPolyMap(g);
+        assert(m);
+
+        assert(m->geomCount==22);
+        assert(m->polygonCount==23);
+
+        geomFreePolyMap(m);
+        geomFree(g);
+    // }
+    return 1;
+}
+
 int test_GeomIterator(){
     char *input = 
         "GEOMETRYCOLLECTION ("
-            "POINT Z(10 11 12),"
-            "MULTIPOINT(10 11, 12 13, 14 15),"
-            "POLYGON((101 111, 121 131, 141 151),(9 8, 12 13)),"
-            "POINTZM(10 11 12 13),"
-            "POLYGON((10 11, 12 13, 14 15),(9 8, 12 13)),"
-            "GEOMETRYCOLLECTION ("
-                "MULTIPOINT(10 11, 12 13, 14 15),"
-                "POLYGON((101 111, 121 131, 141 151),(9 8, 12 13))"
-            "),"
-            "POINTZ(10 11 12),"
-            "LINESTRINGZ(10 11 9,12 13 8,14 15 7),"
-            "LINESTRING ZM(10 11 9 100,12 13 8 101,14 15 7 102),"
-            "POINT ZM(10 11 12 13)"
+    /*  1 */         "POINT Z(10 11 12),"
+    /*  2 */         "MULTIPOINT(10 11, 12 13, 14 15),"
+    /*  3 */         "POLYGON((101 111, 121 131, 141 151),(9 8, 12 13)),"
+    /*  4 */         "POINTZM(10 11 12 13),"
+    /*  5 */         "POLYGON((10 11, 12 13, 14 15),(9 8, 12 13)),"
+    /*    */         "GEOMETRYCOLLECTION ("
+    /*  6 */             "MULTIPOINT(10 11, 12 13, 14 15),"
+    /*  7 */             "POLYGON((101 111, 121 131, 141 151),(9 8, 12 13))"
+    /*    */         "),"
+    /*  8 */         "POINTZ(10 11 12),"
+    /*  9 */         "LINESTRINGZ(10 11 9,12 13 8,14 15 7),"
+    /* 10 */         "LINESTRING ZM(10 11 9 100,12 13 8 101,14 15 7 102),"
+    /* 11 */         "POINT ZM(10 11 12 13)"
         ")";
+
     geom g;
     int sz;
     geomErr err = geomDecode(input, strlen(input), 0, &g, &sz);
     assert(err == GEOM_ERR_NONE);
-    for (int i=0;i<2;i++){
-        int count = 0;
-        
-        geomIterator *itr = geomNewGeometryCollectionIterator(g, i);
-        assert(itr);
-        while (geomIteratorNext(itr)){
-            geom ig;
-            int sz;
-            assert(geomIteratorValues(itr, &ig, &sz));
-            if (geomGetType(ig) == GEOM_GEOMETRYCOLLECTION){
-                geomIterator *itr2 = geomNewGeometryCollectionIterator(ig, 0);
-                assert(itr2);
-                while (geomIteratorNext(itr2)){
-                    geom ig2;
-                    int sz2;
-                    assert(geomIteratorValues(itr2, &ig2, &sz2));
-                    count++;
-                }
-                geomFreeIterator(itr2);        
+    int count = 0;
+    geomIterator *itr = geomNewGeometryCollectionIterator(g);
+    assert(itr);
+    while (geomIteratorNext(itr)){
+        geom ig;
+        int sz;
+        assert(geomIteratorValues(itr, &ig, &sz));
+        if (geomGetType(ig) == GEOM_GEOMETRYCOLLECTION){
+            geomIterator *itr2 = geomNewGeometryCollectionIterator(ig);
+            assert(itr2);
+            while (geomIteratorNext(itr2)){
+                geom ig2;
+                int sz2;
+                assert(geomIteratorValues(itr2, &ig2, &sz2));
+                count++;
             }
-            count++;
+            geomFreeIterator(itr2);        
         }
-        geomFreeIterator(itr);
-        if (i==0){
-            assert(count==12);
-        }else{
-            assert(count==11);
-        }
+        count++;
     }
-    int count;
-    geom *arr = geomGeometryCollectionFlattenedArray(g, &count);
+    geomFreeIterator(itr);
+    int count2;
+    geom *arr = geomGeometryCollectionFlattenedArray(g, &count2);
     assert(arr);
-    assert(count==11);
+    assert(count2==11);
     geomFreeFlattenedArray(arr);
     geomFree(g);
     return 1;

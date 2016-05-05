@@ -34,6 +34,9 @@
 extern "C" {
 #endif
 
+#include <stdlib.h>
+#include "poly.h"
+
 typedef enum {
     GEOM_UNKNOWN            = 0,
     GEOM_POINT              = 1,
@@ -100,13 +103,40 @@ geom geomNewCirclePolygon(geomCoord center, double meters, int steps);
 int geomIsSimplePoint(geom g);
 
 typedef struct geomIterator geomIterator;
-geomIterator *geomNewGeometryCollectionIterator(geom g, int flatten);
+geomIterator *geomNewGeometryCollectionIterator(geom g);
 int geomIteratorNext(geomIterator *itr);
 void geomFreeIterator(geomIterator *itr);
 int geomIteratorValues(geomIterator *itr, geom *g, int *sz);
 
 geom *geomGeometryCollectionFlattenedArray(geom g, int *count);
 void geomFreeFlattenedArray(geom *garr);
+
+typedef struct geomPolyMap{
+    geom g;         // first geometry.
+    geomType type;  // type of the first geometry.
+    int z,m;        // indicates that z or m are provided.
+    int dims;       // number of dimensions per point.
+    int collection; // indicates that the geometries are on the heap.
+    int multipoly;  // indicates that the polygons and holes are on the heap.
+
+    // geoms
+    int geomCount;  // the number of geometries.
+    geom *geoms;    // one or more geometries.
+
+    // polys
+    polyPoint center;        // center point of the first geometry.
+    polyRect bounds;         // minimum bounding rect of the first geometry.
+    int polygonCount;        // number of polygons and holes.
+    polyPolygon *polygons;   // all of the polygons belonging to the geometry.
+    polyMultiPolygon *holes; // all of the holes belonging to the geometry.
+
+    // some private vars
+    polyPolygon ppoly;
+    polyMultiPolygon pholes;
+} geomPolyMap;
+
+void geomFreePolyMap(geomPolyMap *m);
+geomPolyMap *geomNewPolyMap(geom g);
 
 #if defined(__cplusplus)
 }
