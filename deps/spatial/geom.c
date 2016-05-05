@@ -994,6 +994,7 @@ int geomRectString(geomRect r, int withZ, int withM, char *str){
 #include "geom_levels.c"
 #include "geom_within.c"
 #include "geom_intersects.c"
+#include "geom_map.c"
 
 
 // geomGetCoord return any coord that is contained somewhere within the specified geometry.

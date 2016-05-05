@@ -99,7 +99,6 @@ int geomWithinBounds(geom g, geomRect bounds);
 geom geomNewCirclePolygon(geomCoord center, double meters, int steps);
 int geomIsSimplePoint(geom g);
 
-
 typedef struct geomIterator geomIterator;
 geomIterator *geomNewGeometryCollectionIterator(geom g, int flatten);
 int geomIteratorNext(geomIterator *itr);

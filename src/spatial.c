@@ -741,10 +741,10 @@ static int searchIterator(double minX, double minY, double maxX, double maxY, vo
     int match = 0;
     switch (ctx->targetType){
     case RADIUS:
-        if (ctx->searchType==WITHIN){
-            match = geomWithinRadius(g, ctx->center, ctx->meters, ctx->g);
+        if (ctx->searchType==WITHIN || geomIsSimplePoint(g)){
+            match = geomWithinRadius(g, ctx->center, ctx->meters);
         } else {
-            match = geomIntersectsRadius(g, ctx->center, ctx->meters, ctx->g);            
+            match = geomIntersects(g, ctx->g);
         }
         break;
     case GEOMETRY:
