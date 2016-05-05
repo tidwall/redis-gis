@@ -82,32 +82,29 @@ geomCoord geomRectCenter(geomRect r);
 geomRect geomRectExpand(geomRect r, geomCoord c);
 geomRect geomRectUnion(geomRect r1, geomRect r2);
 int geomRectString(geomRect r, int withZ, int withM, char *str);
-
 geomErr geomDecodeWKT(const char *input, geomWKTDecodeOpts opts, geom *g, int *size);
 geomErr geomDecodeWKB(const void *input, size_t length, geom *g, int *size);
-
-// geomDecode auto detects the input, WKT or WKB
 geomErr geomDecode(const void *input, size_t length, geomWKTDecodeOpts opts, geom *g, int *size);
-
 void geomFree(geom g);
 char *geomEncodeWKT(geom g, geomWKTEncodeOpts opts);
 void geomFreeWKT(char *wkt);
 geomType geomGetType(geom g);
-
-// geom indexing functions.
 geomCoord geomCenter(geom g);
 geomRect geomBounds(geom g);
-
-// geom search functions.
-int geomWithin(geom g, geom target);
 int geomIntersects(geom g, geom target);
-int geomWithinRadius(geom g, geomCoord center, double meters, geom circlePolygon);
-int geomIntersectsRadius(geom g, geomCoord center, double meters, geom circlePolygon);
-int geomWithinBounds(geom g, geomRect bounds);
 int geomIntersectsBounds(geom g, geomRect bounds);
-
+int geomWithin(geom g, geom target);
+int geomWithinRadius(geom g, geomCoord center, double meters);
+int geomWithinBounds(geom g, geomRect bounds);
 geom geomNewCirclePolygon(geomCoord center, double meters, int steps);
+int geomIsSimplePoint(geom g);
 
+
+typedef struct geomIterator geomIterator;
+geomIterator *geomNewGeometryCollectionIterator(geom g);
+int geomIteratorNext(geomIterator *itr);
+void geomFreeIterator(geomIterator *itr);
+int geomIteratorValues(geomIterator *itr, geom *g, int *sz);
 
 #if defined(__cplusplus)
 }

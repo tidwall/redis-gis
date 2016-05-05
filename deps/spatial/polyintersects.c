@@ -114,6 +114,10 @@ int polyPointIntersects(polyPoint p, polyPolygon exterior, polyMultiPolygon hole
 	return polyPointInside(p, exterior, holes);
 }
 
+int polyLinesIntersect(polyPoint a1, polyPoint a2, polyPoint b1, polyPoint b2){
+	return lineintersects(a1,a2,b1,b2);	
+}
+
 // Intersects detects if a polygon intersects another polygon
 int polyPolygonIntersects(polyPolygon shape, polyPolygon exterior, polyMultiPolygon holes) {
 	switch (shape.len) {

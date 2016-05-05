@@ -85,7 +85,7 @@ int polyRectInsideRect(polyRect r, polyRect rect);
 char *polyPolygonString(polyPolygon pp);
 int polyPointIntersects(polyPoint p, polyPolygon exterior, polyMultiPolygon holes);
 int polyPolygonIntersects(polyPolygon shape, polyPolygon exterior, polyMultiPolygon holes);
-
+int polyLinesIntersect(polyPoint a1, polyPoint a2, polyPoint b1, polyPoint b2);
 
 #if defined(__cplusplus)
 }

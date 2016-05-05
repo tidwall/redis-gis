@@ -466,6 +466,8 @@ int test_GeomMultiPolygon(){
     return 1;
 }
 
+
+
 int test_GeomGeometryCollection(){
     testGeomMBRWKT("GEOMETRYCOLLECTION EMPTY", "0 0 0 0,0 0 0 0");
     testGeomMBRWKT("GEOMETRYCOLLECTION ()", "0 0 0 0,0 0 0 0");
@@ -476,6 +478,56 @@ int test_GeomGeometryCollection(){
         "MULTIPOINT(10 11, 12 13, 14 15),"
         "POLYGON((101 111, 121 131, 141 151),(9 8, 12 13))"
     ")", "10 11 0 0,141 151 0 0");
+
+
+    char *input = 
+        "GEOMETRYCOLLECTION ("
+            "POINT Z(10 11 12),"
+            "MULTIPOINT(10 11, 12 13, 14 15),"
+            "POLYGON((101 111, 121 131, 141 151),(9 8, 12 13)),"
+            "POINTZM(10 11 12 13),"
+            "POLYGON((10 11, 12 13, 14 15),(9 8, 12 13)),"
+            "GEOMETRYCOLLECTION ("
+                "MULTIPOINT(10 11, 12 13, 14 15),"
+                "POLYGON((101 111, 121 131, 141 151),(9 8, 12 13))"
+            "),"
+            "POINTZ(10 11 12),"
+            "LINESTRINGZ(10 11 9,12 13 8,14 15 7),"
+            "LINESTRING ZM(10 11 9 100,12 13 8 101,14 15 7 102),"
+            "POINT ZM(10 11 12 13)"
+        ")";
+
+    int count = 0;
+    geom g;
+    int sz;
+    geomErr err = geomDecode(input, strlen(input), 0, &g, &sz);
+    assert(err == GEOM_ERR_NONE);
+
+//    printf("\n");
+
+    geomIterator *itr = geomNewGeometryCollectionIterator(g);
+    assert(itr);
+    while (geomIteratorNext(itr)){
+        geom ig;
+        int sz;
+        assert(geomIteratorValues(itr, &ig, &sz));
+        if (geomGetType(ig) == GEOM_GEOMETRYCOLLECTION){
+            geomIterator *itr2 = geomNewGeometryCollectionIterator(ig);
+            assert(itr2);
+            while (geomIteratorNext(itr2)){
+                geom ig2;
+                int sz2;
+                assert(geomIteratorValues(itr2, &ig2, &sz2));
+                //printf("  geom! %d bytes\n", sz2);
+                count++;
+            }
+            geomFreeIterator(itr2);        
+        }
+        //printf("geom! %d bytes\n", sz);
+        count++;
+    }
+    geomFreeIterator(itr);
+    assert(count==12);
     return 1;
 }
 

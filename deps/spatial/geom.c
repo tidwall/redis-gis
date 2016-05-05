@@ -1103,3 +1103,143 @@ geom geomNewCirclePolygon(geomCoord center, double meters, int steps){
     return (geom)b;
 }
 
+int geomIsSimplePoint(geom g){
+    if (g){
+        switch (*((uint32_t*)(((uint8_t*)g)+1))){
+        case 1: case 1001: case 2001: case 3001:
+            return 1;
+        }
+    }
+    return 0;
+}
+
+typedef struct geomIterator {
+    ghdr hdr;
+    int count;
+    int idx;
+    uint8_t *ptr;
+    geom g;
+    int sz;
+
+} geomIterator;
+
+geomIterator *geomNewGeometryCollectionIterator(geom g){
+    if (!g){
+        return NULL;
+    }
+    uint8_t *ptr = (uint8_t*)g;
+    ptr++;
+    ghdr h = readhdr(ptr);
+    if (h.type!=GEOM_GEOMETRYCOLLECTION){
+        return NULL;
+    }
+    ptr+=4;
+    int count = *((uint32_t*)ptr);
+    ptr+=4;
+    geomIterator *itr = malloc(sizeof(geomIterator));
+    if (!itr){
+        return NULL;
+    }
+    memset(itr, 0, sizeof(geomIterator));
+    itr->hdr = h;
+    itr->count = count; 
+    itr->ptr = ptr;
+    return itr;
+}
+
+int geomIteratorValues(geomIterator *itr, geom *g, int *sz){
+    if (!itr){
+        return 0;
+    }
+    if (g){
+        *g = itr->g;
+    }
+    if (sz){
+        *sz = itr->sz;
+    }
+    return 1;
+}
+
+int geomIteratorNext(geomIterator *itr){
+    if (!itr){
+        return 0;
+    }
+    if (!itr->count){
+        return 0;
+    }
+    itr->g = 0;
+    itr->sz = 0;
+    uint8_t *optr = itr->ptr;
+    itr->ptr++;
+    ghdr h = readhdr(itr->ptr);
+    itr->ptr+=4;
+    if (h.type==GEOM_UNKNOWN){
+        return 0;
+    }
+    int dims = 2;
+    if (h.z){
+        dims++;
+    }
+    if (h.m){
+        dims++;
+    }
+    switch(h.type){
+    case GEOM_GEOMETRYCOLLECTION:{
+        // nested geometry collection. but hey why not...
+        geomIterator *itr2 = geomNewGeometryCollectionIterator((geom)optr);
+        if (!itr2){
+            return 0;
+        }
+        while (geomIteratorNext(itr2));
+        itr->ptr = itr2->ptr;
+        geomFreeIterator(itr2);
+        break;
+    }
+    case GEOM_POINT:{
+        itr->ptr += (dims*8);
+        break;
+    }
+    case GEOM_MULTIPOINT:
+    case GEOM_LINESTRING:{
+        int count = *((uint32_t*)itr->ptr);
+        itr->ptr+=4;
+        itr->ptr+=count*(dims*8);
+        break;
+    }
+    case GEOM_MULTILINESTRING:
+    case GEOM_POLYGON:{
+        int count = *((uint32_t*)itr->ptr);
+        itr->ptr+=4;
+        for (int i=0;i<count;i++){
+            int count2 = *((uint32_t*)itr->ptr);
+            itr->ptr+=4;
+            itr->ptr+=count2*(dims*8);
+        }
+        break;
+    }
+    case GEOM_MULTIPOLYGON:{
+        int count = *((uint32_t*)itr->ptr);
+        itr->ptr+=4;
+        for (int i=0;i<count;i++){
+            int count2 = *((uint32_t*)itr->ptr);
+            itr->ptr+=4;
+            for (int j=0;j<count2;j++){
+                int count3 = *((uint32_t*)itr->ptr);
+                itr->ptr+=4;
+                itr->ptr+=count3*(dims*8);
+            }
+        }
+        break;
+    }}
+    itr->g = (geom)optr;
+    itr->sz = itr->ptr-optr;
+    itr->count--;
+    return 1;
+}
+
+void geomFreeIterator(geomIterator *itr){
+    if (!itr){
+        return;
+    }
+    free(itr);
+}
