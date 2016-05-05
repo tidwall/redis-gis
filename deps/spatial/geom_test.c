@@ -498,13 +498,13 @@ int test_GeomIterator(){
             "LINESTRING ZM(10 11 9 100,12 13 8 101,14 15 7 102),"
             "POINT ZM(10 11 12 13)"
         ")";
-
+    geom g;
+    int sz;
+    geomErr err = geomDecode(input, strlen(input), 0, &g, &sz);
+    assert(err == GEOM_ERR_NONE);
     for (int i=0;i<2;i++){
         int count = 0;
-        geom g;
-        int sz;
-        geomErr err = geomDecode(input, strlen(input), 0, &g, &sz);
-        assert(err == GEOM_ERR_NONE);
+        
         geomIterator *itr = geomNewGeometryCollectionIterator(g, i);
         assert(itr);
         while (geomIteratorNext(itr)){
@@ -531,6 +531,12 @@ int test_GeomIterator(){
             assert(count==11);
         }
     }
+    int count;
+    geom *arr = geomGeometryCollectionFlattenedArray(g, &count);
+    assert(arr);
+    assert(count==11);
+    geomFreeFlattenedArray(arr);
+    geomFree(g);
     return 1;
 }
 

@@ -1299,3 +1299,49 @@ void geomFreeIterator(geomIterator *itr){
     }
     free(itr);
 }
+
+geom *geomGeometryCollectionFlattenedArray(geom g, int *count){
+    geom *gg = NULL;
+    geomIterator *itr = NULL;
+    itr = geomNewGeometryCollectionIterator(g, 1);
+    if (!itr){
+        goto err;
+    }
+    gg = malloc(0);
+    if (!gg){
+        goto err;
+    }
+    int len = 0;
+    int cap = 0;
+    geom ig = NULL;
+    while (geomIteratorNext(itr)){
+        if (!geomIteratorValues(itr, &ig, NULL)){
+            goto err;
+        }
+         if (len==cap){
+            int ncap = cap==0?1:cap*2;
+            geom *ngg = realloc(gg, ncap*sizeof(geom));
+            if (!ngg){
+                goto err;
+            } 
+            gg = ngg;
+            cap = ncap;
+        }
+        gg[len++] = ig;
+    }
+    if (count){
+        *count = len;
+    }
+    geomFreeIterator(itr);
+    return gg;
+err:
+    free(gg);
+    geomFreeIterator(itr);
+    return NULL;
+}
+
+void geomFreeFlattenedArray(geom *garr){
+    if (garr){
+        free(garr);
+    }
+}

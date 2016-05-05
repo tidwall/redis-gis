@@ -106,6 +106,9 @@ int geomIteratorNext(geomIterator *itr);
 void geomFreeIterator(geomIterator *itr);
 int geomIteratorValues(geomIterator *itr, geom *g, int *sz);
 
+geom *geomGeometryCollectionFlattenedArray(geom g, int *count);
+void geomFreeFlattenedArray(geom *garr);
+
 #if defined(__cplusplus)
 }
 #endif
