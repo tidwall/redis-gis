@@ -994,7 +994,6 @@ void gsearchCommand(client *c){
     ctx.s = o->ptr;
     rtreeSearch(ctx.s->tr, ctx.bounds.min.x, ctx.bounds.min.y, ctx.bounds.max.x, ctx.bounds.max.y, searchIterator, &ctx);
     if (!ctx.fail){
-        // return results
         addReplyMultiBulkLen(c, 2);
         addReplyBulkLongLong(c, 0); // future cursor support
         addReplyMultiBulkLen(c, ctx.len*2);

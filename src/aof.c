@@ -986,7 +986,30 @@ int rewriteHashObject(rio *r, robj *key, robj *o) {
 /* Emit the commands needed to rebuild a spatial object.
  * The function returns 0 on error, 1 on success. */
 int rewriteSpatialObject(rio *r, robj *key, robj *o) {
-    return rewriteHashObject(r, key, robjSpatialGetHash(o));
+    o = robjSpatialGetHash(o);
+    hashTypeIterator *hi;
+    long long count = 0, items = hashTypeLength(o);
+
+    hi = hashTypeInitIterator(o);
+    while (hashTypeNext(hi) != C_ERR) {
+        if (count == 0) {
+            int cmd_items = (items > AOF_REWRITE_ITEMS_PER_CMD) ?
+                AOF_REWRITE_ITEMS_PER_CMD : items;
+
+            if (rioWriteBulkCount(r,'*',2+cmd_items*2) == 0) return 0;
+            if (rioWriteBulkString(r,"GMSET",5) == 0) return 0;
+            if (rioWriteBulkObject(r,key) == 0) return 0;
+        }
+
+        if (rioWriteHashIteratorCursor(r, hi, OBJ_HASH_KEY) == 0) return 0;
+        if (rioWriteHashIteratorCursor(r, hi, OBJ_HASH_VALUE) == 0) return 0;
+        if (++count == AOF_REWRITE_ITEMS_PER_CMD) count = 0;
+        items--;
+    }
+
+    hashTypeReleaseIterator(hi);
+
+    return 1;
 }
 
 

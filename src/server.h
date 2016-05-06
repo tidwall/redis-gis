@@ -1088,7 +1088,6 @@ extern double R_Zero, R_PosInf, R_NegInf, R_Nan;
 extern dictType hashDictType;
 extern dictType replScriptCacheDictType;
 extern dictType keyptrDictType;
-extern dictType spatialDictType;
 
 
 /*-----------------------------------------------------------------------------

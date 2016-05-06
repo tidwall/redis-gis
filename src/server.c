@@ -684,16 +684,6 @@ dictType replScriptCacheDictType = {
     NULL                        /* val destructor */
 };
 
-/* Spatial type hash table */
-dictType spatialDictType = {
-    dictSdsHash,                /* hash function */
-    NULL,                       /* key dup */
-    NULL,                       /* val dup */
-    dictSdsKeyCompare,          /* key compare */
-    dictSdsDestructor,          /* key destructor */
-    dictSdsDestructor           /* val destructor */
-};
-
 int htNeedsResize(dict *dict) {
     long long size, used;
 
