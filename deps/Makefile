@@ -90,8 +90,8 @@ geohash-int: .make-prerequisites
 
 .PHONY: geohash-int
 
-tile38geo: .make-prerequisites
+spatial: .make-prerequisites
 	@printf '%b %b\n' $(MAKECOLOR)MAKE$(ENDCOLOR) $(BINCOLOR)$@$(ENDCOLOR)
-	cd tile38geo && $(MAKE)
+	cd spatial && $(MAKE)
 
-.PHONY: tile38geo
+.PHONY: spatial
