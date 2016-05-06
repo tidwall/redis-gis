@@ -644,8 +644,8 @@ ssize_t rdbSaveObject(rio *rdb, robj *o) {
         } else {
             serverPanic("Unknown sorted set encoding");
         }
-    } else if (o->type == OBJ_HASH || 
-               o->type == OBJ_SPATIAL) 
+    } else if (o->type == OBJ_HASH ||
+               o->type == OBJ_SPATIAL)
     {
         if (o->type == OBJ_SPATIAL){
             o = (robj*)robjSpatialGetHash(o);
@@ -1134,7 +1134,6 @@ robj *rdbLoadObject(int rdbtype, rio *rdb) {
         if (rdbtype == RDB_TYPE_SPATIAL) {
             o = robjSpatialNewHash(o);
         }
-
     } else if (rdbtype == RDB_TYPE_LIST_QUICKLIST) {
         if ((len = rdbLoadLen(rdb,NULL)) == RDB_LENERR) return NULL;
         o = createQuicklistObject();
@@ -1165,7 +1164,7 @@ robj *rdbLoadObject(int rdbtype, rio *rdb) {
          * size as this is an O(N) scan. Eventually everything will get
          * converted. */
         switch(rdbtype) {
-            case RDB_TYPE_HASH_ZIPMAP: 
+            case RDB_TYPE_HASH_ZIPMAP:
             case RDB_TYPE_SPATIAL_ZIPMAP:
                 /* Convert to ziplist encoded hash. This must be deprecated
                  * when loading dumps created by Redis 2.4 gets deprecated. */
@@ -1225,7 +1224,7 @@ robj *rdbLoadObject(int rdbtype, rio *rdb) {
         }
 
         /* Convert to spatial type if needed. */
-        if (rdbtype == RDB_TYPE_SPATIAL_ZIPLIST || 
+        if (rdbtype == RDB_TYPE_SPATIAL_ZIPLIST ||
             rdbtype == RDB_TYPE_SPATIAL_ZIPMAP)
         {
             o = robjSpatialNewHash(o);

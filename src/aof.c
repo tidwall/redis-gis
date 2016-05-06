@@ -1011,8 +1011,6 @@ int rewriteSpatialObject(rio *r, robj *key, robj *o) {
 
     return 1;
 }
-
-
 /* This function is called by the child rewriting the AOF file to read
  * the difference accumulated from the parent into a buffer, that is
  * concatenated at the end of the rewrite. */
