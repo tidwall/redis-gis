@@ -716,6 +716,8 @@ typedef struct searchContext {
     // geometry
     geom g;
     int sz;
+    geomPolyMap *m;
+
 } searchContext;
 
 static int searchIterator(double minX, double minY, double maxX, double maxY, void *item, void *userdata){
@@ -739,33 +741,23 @@ static int searchIterator(double minX, double minY, double maxX, double maxY, vo
     sds value = hashTypeGetFromHashTable(ctx->s->h, key);
     geom g = (geom)value;
     int match = 0;
-    switch (ctx->targetType){
-    case RADIUS:
-        if (ctx->searchType==WITHIN || geomIsSimplePoint(g)){
-            match = geomWithinRadius(g, ctx->center, ctx->meters);
-        } else {
-            match = geomIntersects(g, ctx->g);
+    if ((ctx->targetType == RADIUS) && (ctx->searchType==WITHIN || geomIsSimplePoint(g))){
+        match = geomCoordWithinRadius(geomCenter(g), ctx->center, ctx->meters);
+    } else {
+        geomPolyMap *m = geomNewPolyMapSingleThreaded(g);
+        if (!m){
+            return 0;
         }
-        break;
-    case GEOMETRY:
         if (ctx->searchType==WITHIN){
-            match = geomWithin(g, ctx->g);
+            match = geomPolyMapWithin(m, ctx->m);
         } else {
-            match = geomIntersects(g, ctx->g);
+            match = geomPolyMapIntersects(m, ctx->m);
         }
-        break;
-    case BOUNDS:
-        if (ctx->searchType==WITHIN){
-            match = geomWithinBounds(g, ctx->bounds);
-        } else {
-            match = geomIntersectsBounds(g, ctx->bounds);
-        }
-        break;
+        geomFreePolyMap(m);
     }
     if (!match){
         return 1;
     }
-
     // append item
     if (ctx->len == ctx->cap){
         int ncap = ctx->cap;
@@ -847,21 +839,31 @@ void gsearchCommand(client *c){
         if (getDoubleFromObjectOrReply(c, c->argv[i+2], &ctx.bounds.min.y, "need numeric min latitude") != C_OK) return;
         if (getDoubleFromObjectOrReply(c, c->argv[i+3], &ctx.bounds.max.x, "need numeric max longitude") != C_OK) return;
         if (getDoubleFromObjectOrReply(c, c->argv[i+4], &ctx.bounds.max.y, "need numeric max latitude") != C_OK) return;
-        if ((ctx.bounds.min.x < -180 || ctx.bounds.min.x > 180 || ctx.bounds.min.y < -90 || ctx.bounds.min.y > 90)||
-            (ctx.bounds.max.x < -180 || ctx.bounds.max.x > 180 || ctx.bounds.max.y < -90 || ctx.bounds.max.y > 90)){
+        if (ctx.bounds.min.x < -180 || ctx.bounds.min.x > 180 || ctx.bounds.min.y < -90 || ctx.bounds.min.y > 90 ||
+            ctx.bounds.max.x < -180 || ctx.bounds.max.x > 180 || ctx.bounds.max.y < -90 || ctx.bounds.max.y > 90 ||
+            ctx.bounds.min.x > ctx.bounds.max.x || ctx.bounds.min.y > ctx.bounds.max.y){
             addReplyError(c, "invalid longitude/latitude pairs");
             return;
         }
         ctx.targetType = BOUNDS;
-        i+=4;
-
+        ctx.g = geomNewRectPolygon(ctx.bounds);
+        i+=5;
     } else {
-        addReplyError(c, "unsupported target provided. please use radius or geometry");
+        addReplyError(c, "invalid geometry");
         return;
     }
     if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.emptymultibulk)) == NULL || checkType(c,o,OBJ_SPATIAL)) {
         goto done;
     }
+
+    if (ctx.g){
+        ctx.m = geomNewPolyMap(ctx.g);
+        if (!ctx.m){
+            addReplyError(c, "poly map failure");
+            goto done;
+        }
+    }
+
     ctx.s = o->ptr;
     rtreeSearch(ctx.s->tr, ctx.bounds.min.x, ctx.bounds.min.y, ctx.bounds.max.x, ctx.bounds.max.y, searchIterator, &ctx);
     if (!ctx.fail){
@@ -883,6 +885,9 @@ void gsearchCommand(client *c){
 done:
     if (ctx.g){
         geomFree(ctx.g);
+    }
+    if (ctx.m){
+        geomFreePolyMap(ctx.m);
     }
     if (ctx.results){
         zfree(ctx.results);

@@ -1099,6 +1099,9 @@ geom geomNewCirclePolygon(geomCoord center, double meters, int steps){
         *((double*)(b+13+(i*16)+8)) = p.y;
         i++;
     }
+    *((double*)(b+13+(i*16)+0)) = *((double*)(b+13+(0*16)+0));
+    *((double*)(b+13+(i*16)+8)) = *((double*)(b+13+(0*16)+8));
+    i++;
     return (geom)b;
 }
 
@@ -1342,6 +1345,7 @@ static int pointWithin(polyPoint a, geomPolyMap *m){
             if (polyPointInside(a, m->polygons[i], m->holes[i])){
                 return 1;
             }
+            break;
         }
     }
     return 0;
@@ -1373,6 +1377,7 @@ static int lineIntersects(polyPoint a, polyPoint b, geomPolyMap *m){
                 polyPointInside(b, m->polygons[i], m->holes[i])){
                 return 1;
             }
+            break;
         }
     }
     return 0;
@@ -1404,6 +1409,7 @@ static int polygonIntersects(polyPolygon polygon, polyMultiPolygon holes, geomPo
             if (polyPolygonInside(polygon, m->polygons[i], m->holes[i])){
                 return 1;
             }
+            break;
         }
     }
     return 0;

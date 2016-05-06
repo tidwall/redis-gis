@@ -27,6 +27,7 @@
  */
 
 #include <stdint.h>
+#include <stdio.h>
 #include "poly.h"
 
 static polyMultiPolygon emptyMultiPolygon = {0,0,0};
