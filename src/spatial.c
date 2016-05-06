@@ -705,6 +705,7 @@ typedef struct searchContext {
     int len;
     int cap;
     resultItem *results;
+    int cursor;
 
     // bounds
     geomRect bounds;
@@ -781,20 +782,53 @@ static int searchIterator(double minX, double minY, double maxX, double maxY, vo
     return 1;
 }
 
+// GSEARCH key 
+//   [WITHIN|INTERSECTS] 
+//   [CURSOR cursor]
+//   [MATCH pattern]
+//   [OUTPUT COUNT|FIELD|WKT|WKB|GEOJSON|POINT|BOUNDS|(HASH precision)]
+//   (MEMBER key field)|
+//      (BOUNDS minlon minlat maxlon maxlat)|
+//      (GEOMETRY geojson)|
+//      (TILE x y z)|
+//      (QUADKEY quadkey)|
+//      (HASH geohash)
+//      (RADIUS lon lat meters)
 void gsearchCommand(client *c){
+    int releaseg = 1;
     robj *o;
     searchContext ctx;
     memset(&ctx, 0, sizeof(searchContext));
     ctx.c = c;
     ctx.searchType = INTERSECTS;
+    ctx.cursor = -1;
     int i = 2;
-    if (strieq(c->argv[i]->ptr, "within")){
-        ctx.searchType = WITHIN;
-        i++;
-    } else if (strieq(c->argv[i]->ptr, "intersects")){
-        ctx.searchType = INTERSECTS;
-        i++;
+    
+    if (i<c->argc){
+        if (strieq(c->argv[i]->ptr, "within")){
+            ctx.searchType = WITHIN;
+            i++;
+        } else if (strieq(c->argv[i]->ptr, "intersects")){
+            ctx.searchType = INTERSECTS;
+            i++;
+        }
     }
+    if (i<c->argc){
+        if (strieq(c->argv[i]->ptr, "cursor")){
+            if (i>=c->argc-1){
+                addReplyError(c, "need cursor");
+                return;
+            }
+            if (getLongLongFromObjectOrReply(c, c->argv[i+1], &ctx.cursor, "need numeric cursor") != C_OK) return;
+            if (ctx.cursor < 0){
+                addReplyError(c, "invalid cursor");
+                return;
+            }
+            i+=2;
+        }
+    }
+
+
 
     // parse the target.
     if (strieq(c->argv[i]->ptr, "radius")){
@@ -848,6 +882,32 @@ void gsearchCommand(client *c){
         ctx.targetType = BOUNDS;
         ctx.g = geomNewRectPolygon(ctx.bounds);
         i+=5;
+    } else if (strieq(c->argv[i]->ptr, "member")){
+        if (i>=c->argc-2){
+            addReplyError(c, "need member key, field");
+            return;
+        }
+        robj *o2 = lookupKeyRead(c->db, c->argv[i+1]);
+        if (o2 == NULL){
+            addReplyError(c, "member is not available in database");
+            return;
+        }
+        if (o2 != NULL && o2->type != OBJ_SPATIAL) {
+            addReplyError(c, "member key is holding the wrong kind of value");
+            return;
+        }
+        robj *h2 = spatialGetHash(o2);
+        sds value = hashTypeGetFromHashTable(h2, c->argv[i+2]->ptr);
+        if (value==NULL){
+            addReplyError(c, "member is not available in database");
+            return;   
+        }
+        releaseg=0;
+        ctx.g = (geom)value;
+        ctx.sz = sdslen(value);
+        ctx.targetType = GEOMETRY;
+        ctx.bounds = geomBounds(ctx.g);
+        i+=3;
     } else {
         addReplyError(c, "invalid geometry");
         return;
@@ -883,7 +943,7 @@ void gsearchCommand(client *c){
         }
     }
 done:
-    if (ctx.g){
+    if (ctx.g&&releaseg){
         geomFree(ctx.g);
     }
     if (ctx.m){
