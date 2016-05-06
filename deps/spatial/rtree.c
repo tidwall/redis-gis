@@ -29,6 +29,7 @@
 
 #define NUM_DIMS 2
 
+#include "zmalloc.h"
 #include "rtree_tmpl.c"
 #include "rtree.h"
 
@@ -41,7 +42,7 @@ typedef struct rtreeIterator {
 } rtreeIterator;
 
 rtree *rtreeNew() {
-	rtree *tr = malloc(sizeof(rtree));
+	rtree *tr = zmalloc(sizeof(rtree));
 	if (!tr){
 		return NULL;
 	}
@@ -56,7 +57,7 @@ void rtreeFree(rtree *tr){
 	if (tr->root){
 		freeNode(tr->root);
 	}
-	free(tr);
+	zfree(tr);
 }
 
 // Remove removes item from rtree
@@ -81,7 +82,7 @@ int rtreeInsert(rtree *tr, double minX, double minY, double maxX, double maxY, v
 		return 0;
 	}
 	if (!tr->root) {
-		tr->root = malloc(sizeof(nodeT));
+		tr->root = zmalloc(sizeof(nodeT));
 		if (!tr->root){
 			return 0;
 		}

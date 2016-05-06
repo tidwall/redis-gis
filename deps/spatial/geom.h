@@ -94,13 +94,6 @@ void geomFreeWKT(char *wkt);
 geomType geomGetType(geom g);
 geomCoord geomCenter(geom g);
 geomRect geomBounds(geom g);
-int geomIntersects(geom g, geom target);
-int geomIntersectsBounds(geom g, geomRect bounds);
-int geomWithin(geom g, geom target);
-int geomWithinRadius(geom g, geomCoord center, double meters);
-int geomWithinBounds(geom g, geomRect bounds);
-geom geomNewCirclePolygon(geomCoord center, double meters, int steps);
-int geomIsSimplePoint(geom g);
 
 typedef struct geomIterator geomIterator;
 geomIterator *geomNewGeometryCollectionIterator(geom g);
@@ -111,6 +104,8 @@ int geomIteratorValues(geomIterator *itr, geom *g, int *sz);
 geom *geomGeometryCollectionFlattenedArray(geom g, int *count);
 void geomFreeFlattenedArray(geom *garr);
 
+
+/* geomPolyMap is flattened representation of a geometry. */
 typedef struct geomPolyMap{
     geom g;         // first geometry.
     geomType type;  // type of the first geometry.
@@ -133,10 +128,23 @@ typedef struct geomPolyMap{
     // some private vars
     polyPolygon ppoly;
     polyMultiPolygon pholes;
+    int shared;
 } geomPolyMap;
 
 void geomFreePolyMap(geomPolyMap *m);
 geomPolyMap *geomNewPolyMap(geom g);
+geomPolyMap *geomNewPolyMapSingleThreaded(geom g);
+
+int geomIntersects(geom g, geom target);
+
+int geomIntersectsBounds(geom g, geomRect bounds);
+int geomWithin(geom g, geom target);
+int geomWithinRadius(geom g, geomCoord center, double meters);
+int geomWithinBounds(geom g, geomRect bounds);
+geom geomNewCirclePolygon(geomCoord center, double meters, int steps);
+geom geomNewRectPolygon(geomRect rect);
+int geomIsSimplePoint(geom g);
+
 
 #if defined(__cplusplus)
 }

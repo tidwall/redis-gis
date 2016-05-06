@@ -59,6 +59,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <string.h>
+#include "zmalloc.h"
 
 #define MIN_NODES (MAX_NODES/2)
 
@@ -203,7 +204,7 @@ static inline int overlap(rectT rectA, rectT rectB) {
 }
 
 static void reinsert(nodeT *node, listNodeT **listNode) {
-    listNodeT *nlistNode = malloc(sizeof(listNodeT));
+    listNodeT *nlistNode = zmalloc(sizeof(listNodeT));
     memset(nlistNode, 0, sizeof(listNodeT));
     nlistNode->node = node;
     nlistNode->next = *listNode;
@@ -410,7 +411,7 @@ static void splitNode(nodeT *node, branchT *branch, nodeT **newNode) {
     level = node->level;
     getBranches(node, branch, parVars);
     choosePartition(parVars, MIN_NODES);
-    *newNode = malloc(sizeof(nodeT));
+    *newNode = zmalloc(sizeof(nodeT));
     memset(*newNode, 0, sizeof(nodeT));
     node->level = level;
     (*newNode)->level = node->level;
@@ -436,7 +437,7 @@ static void freeNode(nodeT *node){
             freeNode(node->branch[i].child);
         }
     }
-    free(node);
+    zfree(node);
 }
 
 static int insertRectRec(rectT rect, void *item, nodeT *node, nodeT **newNode, int level) {
@@ -471,7 +472,7 @@ static int insertRect(rectT rect, void *item, nodeT **root, int level) {
     branchT branch;
     memset(&branch, 0, sizeof(branchT));
     if (insertRectRec(rect, item, *root, &newNode, level)) {
-        newRoot = malloc(sizeof(nodeT));
+        newRoot = zmalloc(sizeof(nodeT));
         memset(newRoot, 0, sizeof(nodeT));
         newRoot->level = (*root)->level + 1;
         branch.rect = nodeCover(*root);
@@ -569,7 +570,7 @@ static int removeRect(rectT rect, void *item, nodeT **root) {
             listNodeT *prev = reinsertList;
             reinsertList = reinsertList->next;
             freeNode(prev->node);
-            free(prev);
+            zfree(prev);
         }
         if ((*root)->count == 1 && (*root)->level > 0) {
             tempNode = (*root)->branch[0].child;

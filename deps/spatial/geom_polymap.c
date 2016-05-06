@@ -1,24 +1,55 @@
+/*
+ * Copyright (c) 2016, Josh Baker <joshbaker77@gmail.com>.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ *  * Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
+ *  * Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *  * Neither the name of Redis nor the names of its contributors may be used
+ *    to endorse or promote products derived from this software without
+ *    specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
+ * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
+ * THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
 #ifndef FROM_GEOM_C
 #error This is not a standalone source file.
 #endif
 
 
 void geomFreePolyMap(geomPolyMap *m){
-	if (m){
+	if (m && !m->shared){
 		if (m->geoms && m->collection){
 			geomFreeFlattenedArray(m->geoms);
 		}
 		if (m->polygons && m->multipoly){
-			free(m->polygons);
+			zfree(m->polygons);
 		}
 		if (m->holes && m->multipoly){
-			free(m->holes);
+			zfree(m->holes);
 		}
-		free(m);
+		zfree(m);
 	}
 }
 
-geomPolyMap *geomNewPolyMap(geom g){
+static geomPolyMap sharedPoint;
+
+static geomPolyMap *geomNewPolyMapBase(geom g, int singleThreaded){
 	if (!g){
 		return NULL;
 	}
@@ -39,11 +70,25 @@ geomPolyMap *geomNewPolyMap(geom g){
 	if (h.m){
 		dims++;
 	}
-	geomPolyMap *m = malloc(sizeof(geomPolyMap));
-	if (!m){
-		return NULL;
+	geomPolyMap *m = NULL;
+	if (singleThreaded && (
+		h.type == GEOM_POINT || 
+		h.type == GEOM_MULTIPOINT || 
+		h.type == GEOM_LINESTRING || 
+		h.type == GEOM_POLYGON)
+	){
+		geomPolyMap tz = {0};
+		sharedPoint = tz;
+		m = &sharedPoint;
+		m->shared = 1;
+	} else {
+		m = zmalloc(sizeof(geomPolyMap));
+		if (!m){
+			return NULL;
+		}
+		memset(m, 0, sizeof(geomPolyMap));
 	}
-	memset(m, 0, sizeof(geomPolyMap));
+	
 	m->g = g;
 	geomCoord center = geomCenter(g);
 	m->center.x = center.x;
@@ -114,12 +159,12 @@ geomPolyMap *geomNewPolyMap(geom g){
 		ptr+=4;
 		m->multipoly = 1;
 		m->polygonCount = count;
-		m->polygons = malloc(count*sizeof(polyPolygon));
+		m->polygons = zmalloc(count*sizeof(polyPolygon));
 		if (!m->polygons){
 			goto err;
 		}
 		memset(m->polygons, 0, count*sizeof(polyPolygon));
-		m->holes = malloc(count*sizeof(polyMultiPolygon));
+		m->holes = zmalloc(count*sizeof(polyMultiPolygon));
 		if (!m->holes){
 			goto err;
 		}
@@ -141,12 +186,12 @@ geomPolyMap *geomNewPolyMap(geom g){
 		ptr+=4;
 		m->multipoly = 1;
 		m->polygonCount = count;
-		m->polygons = malloc(count*sizeof(polyPolygon));
+		m->polygons = zmalloc(count*sizeof(polyPolygon));
 		if (!m->polygons){
 			goto err;
 		}
 		memset(m->polygons, 0, count*sizeof(polyPolygon));
-		m->holes = malloc(count*sizeof(polyMultiPolygon));
+		m->holes = zmalloc(count*sizeof(polyMultiPolygon));
 		if (!m->holes){
 			goto err;
 		}
@@ -181,11 +226,11 @@ geomPolyMap *geomNewPolyMap(geom g){
 		polyPolygon *polygons = NULL;
 		polyMultiPolygon *holes = NULL;
 		geomPolyMap *m2 = NULL;
-		polygons = malloc(cap*sizeof(polyPolygon));
+		polygons = zmalloc(cap*sizeof(polyPolygon));
 		if (!polygons){
 			goto err2;
 		}
-		holes = malloc(cap*sizeof(polyMultiPolygon));
+		holes = zmalloc(cap*sizeof(polyMultiPolygon));
 		if (!holes){
 			goto err2;
 		}
@@ -198,11 +243,11 @@ geomPolyMap *geomNewPolyMap(geom g){
 			for (int j=0;j<m2->polygonCount;j++){
 				if (len==cap){
 					int ncap = cap==0?1:cap*2;
-					polyPolygon *npolygons = realloc(polygons, ncap*sizeof(polyPolygon));
+					polyPolygon *npolygons = zrealloc(polygons, ncap*sizeof(polyPolygon));
 					if (!npolygons){
 						goto err2;
 					}
-					polyMultiPolygon *nholes = realloc(holes, ncap*sizeof(polyMultiPolygon));
+					polyMultiPolygon *nholes = zrealloc(holes, ncap*sizeof(polyMultiPolygon));
 					if (!nholes){
 						goto err2;
 					}
@@ -224,10 +269,10 @@ geomPolyMap *geomNewPolyMap(geom g){
 		break;
 	err2:
 		if (polygons){
-			free(polygons);
+			zfree(polygons);
 		}
 		if (holes){
-			free(holes);
+			zfree(holes);
 		}
 		if (m2){
 			geomFreePolyMap(m2);
@@ -240,4 +285,12 @@ err:
 		geomFreePolyMap(m);
 	}
 	return NULL;
+}
+
+geomPolyMap *geomNewPolyMapSingleThreaded(geom g){
+	return geomNewPolyMapBase(g, 1);
+}
+
+geomPolyMap *geomNewPolyMap(geom g){
+	return geomNewPolyMapBase(g, 0);
 }

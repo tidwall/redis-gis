@@ -60,7 +60,13 @@ int test_PolyRectIntersects();
 int test_PolyRectInside();
 
 
+int test_GeomPolyMapPointBench();
+int test_GeomPolyMapPolygonBench();
+int test_GeomPolyMapGeometryCollectionBench();
 
+int test_GeomPolyMapPointBenchSingleThreaded();
+int test_GeomPolyMapPolygonBenchSingleThreaded();
+int test_GeomPolyMapGeometryCollectionBenchSingleThreaded();
 
 typedef struct test{
 	char *name;
@@ -92,6 +98,14 @@ test tests[] = {
 	{ "polyIntersectsShapes", test_PolyIntersectsShapes },
 	{ "polyRectIntersects", test_PolyRectIntersects },
 	{ "polyRectInside", test_PolyRectInside },
+
+	{ "geomPolyMapPointBench", test_GeomPolyMapPointBench },
+	{ "geomPolyMapPolygonBench", test_GeomPolyMapPolygonBench },
+	{ "geomPolyMapGeomColBench", test_GeomPolyMapGeometryCollectionBench },
+	{ "geomPolyMapPointBenchSingleThreaded", test_GeomPolyMapPointBenchSingleThreaded },
+	{ "geomPolyMapPolygonBenchSingleThreaded", test_GeomPolyMapPolygonBenchSingleThreaded },
+	{ "geomPolyMapGeomColBenchSingleThreaded", test_GeomPolyMapGeometryCollectionBenchSingleThreaded },
+
 };
 
 static int abort_handled = 0;
@@ -158,6 +172,7 @@ int main(int argc, const char **argv) {
 		}
 	}
 
+	int mlabelsz = 0;
 	for (int i=0;i<sizeof(tests)/sizeof(test);i++){
 		test t = tests[i];
 		if (!(strlen(run) == 0 || strstr(t.name, run) != 0)){
@@ -165,7 +180,21 @@ int main(int argc, const char **argv) {
 		}
 		char label[50];
 		sprintf(label, "  testing %s", t.name); 
-		fprintf(stdout, "%-35s", label);
+		if (strlen(label) > mlabelsz){
+			mlabelsz = strlen(label);
+		}
+	}
+
+	for (int i=0;i<sizeof(tests)/sizeof(test);i++){
+		test t = tests[i];
+		if (!(strlen(run) == 0 || strstr(t.name, run) != 0)){
+			continue;
+		}
+		char label[50];
+		sprintf(label, "  testing %s", t.name); 
+		char lszs[10];
+		sprintf(lszs, "%%-%ds", mlabelsz+3);
+		fprintf(stdout, lszs, label);
 		fflush(stdout);
 		restartClock();
 		int res = t.test();
@@ -177,7 +206,7 @@ int main(int argc, const char **argv) {
 			printf("\x1b[31m[failed]\x1b[0m\n");
 		} else{
 			printf("\x1b[32m[ok]\x1b[0m");
-			printf(" %6.2f secs", elapsed);
+			printf(" %5.2f secs", elapsed);
 			if (res > 1){
 				double opss = ((double)res)/elapsed;
 				printf(", op/s %.0f", opss);

@@ -30,6 +30,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include "zmalloc.h"
 #include "poly.h"
 #include "grisu3.h"
 
@@ -140,7 +141,7 @@ int polyRectInsideRect(polyRect r, polyRect rect) {
 char *polyPolygonString(polyPolygon pp){
 	int len = 0;
 	char *str = NULL;
-	str = malloc(10);
+	str = zmalloc(10);
 	if (!str){
 		return NULL;
 	}
@@ -157,9 +158,9 @@ char *polyPolygonString(polyPolygon pp){
 		dtoa_grisu3(p.x, dx);
 		dtoa_grisu3(p.y, dy);
 		sprintf(buf, "{%s, %s}", dx, dy);
-		char *nstr = realloc(str, len+strlen(buf)+10);
+		char *nstr = zrealloc(str, len+strlen(buf)+10);
 		if (!nstr){
-			free(nstr);
+			zfree(nstr);
 			return NULL;
 		}
 		str = nstr;

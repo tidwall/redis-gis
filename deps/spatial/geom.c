@@ -31,11 +31,11 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdint.h>
+#include "zmalloc.h"
 #include "geom.h"
 #include "grisu3.h"
 #include "geoutil.h"
 #include "poly.h"
-
 static geomErr geomDecodeWKTInner(const char *input, geomWKTDecodeOpts opts, geom *g, int *size, int *read);
 
 typedef struct ctx{
@@ -89,7 +89,7 @@ static ctx *grow(ctx *c, int len){
     if (!c->validBuffer){
         return c;
     }
-    char *m = realloc(c->g, c->len+len);
+    char *m = zrealloc(c->g, c->len+len);
     if (!m){
         c->err = GEOM_ERR_MEMORY;
         return c;
@@ -538,14 +538,14 @@ static geomErr geomDecodeWKTInner(const char *input, geomWKTDecodeOpts opts, geo
     c = ignorews(c);
     c = geomDecodeGeometry(c);
     if (c->err){
-        free(c->g);
+        zfree(c->g);
         return c->err;
     }
     if (!(opts&GEOM_WKT_LEAVE_OPEN)){
         c = ignorews(c);
         if (c->p[0]){
             // invalid characters found at end of input.
-            free(c->g);
+            zfree(c->g);
             return GEOM_ERR_INPUT; 
         }
     }
@@ -610,10 +610,10 @@ static inline char *appendStr(char *str, int *size, int *cap, char *s){
         while (*size+l >= ncap){
             ncap *= 2;
         }
-        char *nstr = realloc(str, ncap+1);
+        char *nstr = zrealloc(str, ncap+1);
         if (!nstr){
             if (str){
-                free(str);
+                zfree(str);
             }
             return NULL;
         }
@@ -633,7 +633,7 @@ static char *dstr(double n, char *str){
 
 void geomFreeWKT(char *wkt){
     if (wkt){
-        free(wkt);
+        zfree(wkt);
     }
 }
 
@@ -842,7 +842,7 @@ static char *geomEncodeWKTInner(geom g, geomWKTEncodeOpts opts, int *read){
     return str;
 oom:
     if (str){
-        free(str);
+        zfree(str);
     }
     if (wkt){
         geomFreeWKT(wkt);
@@ -852,7 +852,7 @@ oom:
 
 void geomFree(geom g){
     if (g){
-        free(g);
+        zfree(g);
     }
 }
 
@@ -1032,7 +1032,7 @@ geomErr geomDecodeWKB(const void *input, size_t length, geom *g, int *size){
         }
     }
     if (g && size){
-        *g = malloc(length);
+        *g = zmalloc(length);
         if (!*g){
             err = GEOM_ERR_MEMORY;
             goto err;
@@ -1080,7 +1080,7 @@ geom geomNewCirclePolygon(geomCoord center, double meters, int steps){
         steps = 3;
     }
     int sz = ((steps+1)*16)+13; // exact byte count
-    uint8_t *b = malloc(sz);
+    uint8_t *b = zmalloc(sz);
     if (!b){
         return NULL;
     }
@@ -1103,6 +1103,35 @@ geom geomNewCirclePolygon(geomCoord center, double meters, int steps){
     }
     return (geom)b;
 }
+
+geom geomNewRectPolygon(geomRect rect){
+    int sz = (5*16)+13; // exact byte count
+    uint8_t *b = zmalloc(sz);
+    if (!b){
+        return NULL;
+    }
+    if (LITTLE_ENDIAN){
+        b[0] = 0x01;
+    } else{
+        b[0] = 0x00;
+    }
+    *((uint32_t*)(b+1)) = 3;
+    *((uint32_t*)(b+5)) = 1;
+    *((uint32_t*)(b+9)) = 5;
+    double *values = (double*)(b+13);
+    values[0] = rect.min.x;
+    values[1] = rect.max.y;
+    values[2] = rect.max.x;
+    values[3] = rect.max.y;
+    values[4] = rect.max.x;
+    values[5] = rect.min.y;
+    values[6] = rect.min.x;
+    values[7] = rect.min.y;
+    values[8] = rect.min.x;
+    values[9] = rect.max.y;
+    return (geom)b;
+}
+
 
 int geomIsSimplePoint(geom g){
     if (g){
@@ -1142,7 +1171,7 @@ geomIterator *geomNewGeometryCollectionIterator(geom g){
     ptr+=4;
     int count = *((uint32_t*)ptr);
     ptr+=4;
-    geomIterator *itr = malloc(sizeof(geomIterator));
+    geomIterator *itr = zmalloc(sizeof(geomIterator));
     if (!itr){
         return NULL;
     }
@@ -1250,12 +1279,12 @@ void geomFreeIterator(geomIterator *itr){
         return;
     }
     if (itr->fg){
-        free(itr->fg);
+        zfree(itr->fg);
     }
     if (itr->fsz){
-        free(itr->fsz);
+        zfree(itr->fsz);
     }
-    free(itr);
+    zfree(itr);
 }
 
 geom *geomGeometryCollectionFlattenedArray(geom g, int *count){
@@ -1265,7 +1294,7 @@ geom *geomGeometryCollectionFlattenedArray(geom g, int *count){
     if (!itr){
         goto err;
     }
-    gg = malloc(0);
+    gg = zmalloc(0);
     if (!gg){
         goto err;
     }
@@ -1290,7 +1319,7 @@ geom *geomGeometryCollectionFlattenedArray(geom g, int *count){
             geom ig2 = arr[i];
             if (len==cap){
                 int ncap = cap==0?1:cap*2;
-                geom *ngg = realloc(gg, ncap*sizeof(geom));
+                geom *ngg = zrealloc(gg, ncap*sizeof(geom));
                 if (!ngg){
                     if (release){
                         geomFreeFlattenedArray(arr);
@@ -1312,13 +1341,14 @@ geom *geomGeometryCollectionFlattenedArray(geom g, int *count){
     geomFreeIterator(itr);
     return gg;
 err:
-    free(gg);
+    zfree(gg);
     geomFreeIterator(itr);
     return NULL;
 }
 
 void geomFreeFlattenedArray(geom *garr){
     if (garr){
-        free(garr);
+        zfree(garr);
     }
 }
+

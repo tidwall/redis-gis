@@ -33,6 +33,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include <ctype.h>
+#include "zmalloc.h"
 #include "geom.h"
 
 char *randgeometrycollection(int vary, int dim);
@@ -60,8 +61,8 @@ void parseSerializeAndCompare(const char *input){
     assert(text2 != NULL);
     geomFree(g);
     assert(strcmp(text1, text2)==0);
-    free(text1);
-    free(text2);
+    zfree(text1);
+    zfree(text2);
 }
 
 // dstr converts a double to a string and keeps much of the precision.
@@ -95,7 +96,7 @@ double randy() {
 }
 
 #define VINIT()\
-    char *str = malloc(257);\
+    char *str = zmalloc(257);\
     int sz = 256;\
     int idx = 0;\
     str[0] = 0;
@@ -104,7 +105,7 @@ double randy() {
     char cch = ch;\
     if (idx == sz){\
         sz *= 2;\
-        str = realloc(str, sz+1);\
+        str = zrealloc(str, sz+1);\
         assert(str);\
     }\
     if (vary && cch == ' '){\
@@ -150,31 +151,31 @@ double randy() {
 #define VPOINT(dim){\
     char *pstr = randpoint(vary, (dim));\
     VSTR(pstr);\
-    free(pstr);\
+    zfree(pstr);\
 }
 
 #define VLINESTRING(dim){\
     char *pstr = randlinestring(vary, (dim));\
     VSTR(pstr);\
-    free(pstr);\
+    zfree(pstr);\
 }
 
 #define VPOLYGON(dim){\
     char *pstr = randpolygon(vary, (dim));\
     VSTR(pstr);\
-    free(pstr);\
+    zfree(pstr);\
 }
 
 #define VMULTIPOLYGON(dim){\
     char *pstr = randmultipolygon(vary, (dim));\
     VSTR(pstr);\
-    free(pstr);\
+    zfree(pstr);\
 }
 
 #define VGEOMETRYCOLLECTION(dim){\
     char *pstr = randgeometrycollection(vary, (dim));\
     VSTR(pstr);\
-    free(pstr);\
+    zfree(pstr);\
 }
 
 
@@ -329,7 +330,7 @@ char *randgeometrycollection(int vary, int dim){
         case 5: sstr = randGeomMultiPolygon(vary, dim); break;
         }
         VSTR(sstr);
-        free(sstr);
+        zfree(sstr);
     }
     return str;
 }
@@ -338,12 +339,12 @@ void testGeom(int count, int dim, char *(*randGeomCreate)(int, int)){
     for (int i=0;i<count;i++){
         char *tstr = randGeomCreate(0, dim);
         parseSerializeAndCompare(tstr);
-        free(tstr);
+        zfree(tstr);
     }
     for (int i=0;i<count;i++){
         char *tstr = randGeomCreate(1, dim);
         parseSerializeAndCompare(tstr);
-        free(tstr);
+        zfree(tstr);
     }
 }
 
@@ -481,6 +482,70 @@ int test_GeomGeometryCollection(){
     return 1;
 }
 
+int polyMapBench(char *input, int singleThreaded){
+    geom g;
+    int sz;
+    geomErr err = geomDecode(input, strlen(input), 0, &g, &sz);
+    assert(err == GEOM_ERR_NONE);
+    int n = 50000;
+    for (int i=0;i<n;i++){
+        geomPolyMap *m = NULL;
+        if (singleThreaded){
+            m = geomNewPolyMapSingleThreaded(g);
+        } else {
+            m = geomNewPolyMap(g);
+        }
+        assert(m);
+        geomFreePolyMap(m);
+    }
+    geomFree(g);
+    return n;
+}
+
+
+static int test_GeomPolyMapPointBenchBase(int singleThreaded){
+    return polyMapBench("POINT(10 11)", singleThreaded);
+}
+static int test_GeomPolyMapPolygonBenchBase(int singleThreaded){
+    return polyMapBench("POLYGON((10 11, 12 13, 14 15,16 17,10 11),(9 8, 12 13, 9 8))", singleThreaded);
+}
+static int test_GeomPolyMapGeometryCollectionBenchBase(int singleThreaded){
+    char *input = 
+        "GEOMETRYCOLLECTION ("
+    /*  1 */         "POINT Z(10 11 12),"
+    /*  2 */         "MULTIPOINT(10 11, 12 13, 14 15),"
+    /*  3 */         "POLYGON((101 111, 121 131, 141 151),(9 8, 12 13)),"
+    /*  4 */         "POINTZM(10 11 12 13),"
+    /*  5 */         "POLYGON((10 11, 12 13, 14 15),(9 8, 12 13)),"
+    /*    */         "GEOMETRYCOLLECTION ("
+    /*  6 */             "MULTIPOINT(10 11, 12 13, 14 15),"
+    /*  7 */             "POLYGON((101 111, 121 131, 141 151),(9 8, 12 13))"
+    /*    */         "),"
+    /*  8 */         "POINTZ(10 11 12),"
+    /*  9 */         "LINESTRINGZ(10 11 9,12 13 8,14 15 7),"
+    /* 10 */         "LINESTRING ZM(10 11 9 100,12 13 8 101,14 15 7 102),"
+    /* 11 */         "POINT ZM(10 11 12 13)"
+        ")";
+    return polyMapBench(input, singleThreaded);
+}
+int test_GeomPolyMapPointBenchSingleThreaded(){
+    return test_GeomPolyMapPointBenchBase(1);
+}
+int test_GeomPolyMapPolygonBenchSingleThreaded(){
+    return test_GeomPolyMapPolygonBenchBase(1);
+}
+int test_GeomPolyMapGeometryCollectionBenchSingleThreaded(){
+    return test_GeomPolyMapGeometryCollectionBenchBase(1);
+}
+int test_GeomPolyMapPointBench(){
+    return test_GeomPolyMapPointBenchBase(0);
+}
+int test_GeomPolyMapPolygonBench(){
+    return test_GeomPolyMapPolygonBenchBase(0);
+}
+int test_GeomPolyMapGeometryCollectionBench(){
+    return test_GeomPolyMapGeometryCollectionBenchBase(0);
+}
 
 int test_GeomPolyMap(){
     char *input = 

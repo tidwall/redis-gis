@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include "zmalloc.h"
 #include "poly.h"
 #include "test.h"
 
@@ -18,7 +19,7 @@ polyPoint P(double x, double y){
 
 
 void *makeSegment(int count, ...){
-	void *segment = malloc(4+count*16);
+	void *segment = zmalloc(4+count*16);
 	assert(segment);
 	((uint32_t*)segment)[0] = count;
 	va_list ap;
@@ -35,7 +36,7 @@ void *makeSegment(int count, ...){
 
 void *makeMultiSegment(int count, ...){
 	int sz = 4;
-	void *segment = malloc(sz);
+	void *segment = zmalloc(sz);
 	assert(segment);
 	((uint32_t*)segment)[0] = count;
 	va_list ap;
@@ -44,7 +45,7 @@ void *makeMultiSegment(int count, ...){
 		polyPolygon pp = va_arg(ap, polyPolygon);
 		int len = pp.len*16+4;
 		sz += len;
-		segment = realloc(segment, sz);
+		segment = zrealloc(segment, sz);
 		assert(segment);
 		memcpy(segment+sz-len, ((uint8_t*)pp.values)-4, len);
 	}
@@ -82,7 +83,7 @@ int test_PolyRayInside(){
 	testRayInside(P(3, 0.1), strange, 0);
 	testRayInside(P(1, -0.1), strange, 0);
 
-	free(segment);
+	zfree(segment);
 	return 1;
 }
 
@@ -147,27 +148,27 @@ int test_PolyRayExteriorHoles() {
 	};
 
 	int count = sizeof(sizeof(ttpoints)/sizeof(point));
-	point *points = malloc(count*sizeof(point));
+	point *points = zmalloc(count*sizeof(point));
 	assert(points);
 	memcpy(points, ttpoints, count*sizeof(point));
 
 	// add the edges, all should be inside
 	for (int i=0;i<texterior.len;i++) {
-		points = realloc(points, (count+1)*sizeof(point));
+		points = zrealloc(points, (count+1)*sizeof(point));
 		assert(points);
 		point p = {polyPolygonPoint(texterior, i), 1};
 		points[count] = p;
 		count++;
 	}
 	for (int i=0;i<tholeA.len;i++) {
-		points = realloc(points, (count+1)*sizeof(point));
+		points = zrealloc(points, (count+1)*sizeof(point));
 		assert(points);
 		point p = {polyPolygonPoint(tholeA, i), 1};
 		points[count] = p;
 		count++;
 	}
 	for (int i=0;i<tholeB.len;i++) {
-		points = realloc(points, (count+1)*sizeof(point));
+		points = zrealloc(points, (count+1)*sizeof(point));
 		assert(points);
 		point p = {polyPolygonPoint(tholeB, i), 1};
 		points[count] = p;
@@ -178,7 +179,7 @@ int test_PolyRayExteriorHoles() {
 		assert(ok == points[i].ok);
 	}
 
-	free(points);
+	zfree(points);
 
 	return 1;
 }
