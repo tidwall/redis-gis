@@ -543,7 +543,7 @@ int rdbSaveObjectType(rio *rdb, robj *o) {
         else if (o->encoding == OBJ_ENCODING_HT)
             return rdbSaveType(rdb,RDB_TYPE_SPATIAL);
         else
-            serverPanic("Unknown hash encoding");
+            serverPanic("Unknown spatial encoding");
     default:
         serverPanic("Unknown object type");
     }
@@ -1131,7 +1131,7 @@ robj *rdbLoadObject(int rdbtype, rio *rdb) {
         serverAssert(len == 0);
 
         /* Convert to spatial type if needed. */
-        if (rdbtype == RDB_TYPE_SPATIAL){
+        if (rdbtype == RDB_TYPE_SPATIAL) {
             o = robjSpatialNewHash(o);
         }
 
@@ -1225,7 +1225,9 @@ robj *rdbLoadObject(int rdbtype, rio *rdb) {
         }
 
         /* Convert to spatial type if needed. */
-        if (rdbtype == RDB_TYPE_SPATIAL_ZIPLIST || rdbtype == RDB_TYPE_SPATIAL_ZIPMAP){
+        if (rdbtype == RDB_TYPE_SPATIAL_ZIPLIST || 
+            rdbtype == RDB_TYPE_SPATIAL_ZIPMAP)
+        {
             o = robjSpatialNewHash(o);
         }
     } else {
