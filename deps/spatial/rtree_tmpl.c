@@ -1,18 +1,4 @@
-/* An r-tree implementation.
- *
- * This file is derived from the work done by Toni Gutman. R-Trees: A Dynamic Index Structure for
- * Spatial Searching, Proc. 1984 ACM SIGMOD International Conference on Management of Data, pp.
- * 47-57. 
- *
- * The original C code can be found at "http://www.superliminal.com/sources/sources.htm".
- *
- * And the website carries this message: "Here are a few useful bits of free source code. You're
- * completely free to use them for any purpose whatsoever. All I ask is that if you find one to
- * be particularly valuable, then consider sending feedback. Please send bugs and suggestions too.
- * Enjoy"
- *
- * -------
- *
+/*
  * Copyright (c) 2016, Josh Baker <joshbaker77@gmail.com>.
  * All rights reserved.
  *
@@ -39,6 +25,19 @@
  * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+/* An r-tree implementation.
+ *
+ * This file is derived from the original work done by Toni Gutman. R-Trees: 
+ * A Dynamic Index Structure for Spatial Searching, Proc. 1984 ACM SIGMOD 
+ * International Conference on Management of Data, pp. 47-57. 
+ * 
+ * This source file is based on the C++ code which can be found at 
+ * "http://www.superliminal.com/sources/sources.htm".
+ *
+ * The C++ source license is "Entirely free for all uses. Enjoy!"
+ *
  */
 
 /* Template options */

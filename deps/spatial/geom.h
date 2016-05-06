@@ -95,24 +95,45 @@ geomType geomGetType(geom g);
 geomCoord geomCenter(geom g);
 geomRect geomBounds(geom g);
 
-typedef struct geomIterator geomIterator;
-geomIterator *geomNewGeometryCollectionIterator(geom g);
+typedef struct geomIterator {
+    int count;
+    uint8_t *ptr;
+    geom g;
+    int sz;
+} geomIterator;
+
+geomErr geomGeometryCollectionIterator(geom g, geomIterator *itr);
 int geomIteratorNext(geomIterator *itr);
-void geomFreeIterator(geomIterator *itr);
 int geomIteratorValues(geomIterator *itr, geom *g, int *sz);
 
 geom *geomGeometryCollectionFlattenedArray(geom g, int *count);
 void geomFreeFlattenedArray(geom *garr);
+geom geomNewCirclePolygon(geomCoord center, double meters, int steps);
+geom geomNewRectPolygon(geomRect rect);
+int geomIsSimplePoint(geom g);
+int geomCoordWithinRadius(geomCoord c, geomCoord center, double meters);
 
 
-/* geomPolyMap is flattened representation of a geometry. */
+
+/* geomPolyMap is flattened representation of a geometry.
+ * Each geometry is reduced down to a POINT, LINESTRING, or POLYGON.
+ * The resulting polygons are stored in the 'polygons' array.
+ * The number of polygons in the array is specified in 'polygonCount'.
+ * The 'holes' and 'types' arrays will have 'polygonCount' number of elements.
+ *
+ * For example, a simple GEOM_POINT converted to a PolyMap will have 
+ * one element in the 'polygons' array that contains the point data, one 
+ * element in the 'holes' array that is empty, and one element in the 
+ * types array that is GEOM_POINT.
+ */
 typedef struct geomPolyMap{
     geom g;         // first geometry.
     geomType type;  // type of the first geometry.
     int z,m;        // indicates that z or m are provided.
     int dims;       // number of dimensions per point.
-    int collection; // indicates that the geometries are on the heap.
-    int multipoly;  // indicates that the polygons and holes are on the heap.
+    int collection; // the geometries are on the heap.
+    int multipoly;  // the polygons and holes are on the heap.
+    int shared;     // this structure does not need to be freed.
 
     // geoms
     int geomCount;  // the number of geometries.
@@ -124,27 +145,19 @@ typedef struct geomPolyMap{
     int polygonCount;        // number of polygons and holes.
     polyPolygon *polygons;   // all of the polygons belonging to the geometry.
     polyMultiPolygon *holes; // all of the holes belonging to the geometry.
+    geomType *types;         // the geometry type for each polygon/holes.
 
     // some private vars
     polyPolygon ppoly;
     polyMultiPolygon pholes;
-    int shared;
 } geomPolyMap;
 
 void geomFreePolyMap(geomPolyMap *m);
 geomPolyMap *geomNewPolyMap(geom g);
 geomPolyMap *geomNewPolyMapSingleThreaded(geom g);
 
-int geomIntersects(geom g, geom target);
-
-int geomIntersectsBounds(geom g, geomRect bounds);
-int geomWithin(geom g, geom target);
-int geomWithinRadius(geom g, geomCoord center, double meters);
-int geomWithinBounds(geom g, geomRect bounds);
-geom geomNewCirclePolygon(geomCoord center, double meters, int steps);
-geom geomNewRectPolygon(geomRect rect);
-int geomIsSimplePoint(geom g);
-
+int geomPolyMapIntersects(geomPolyMap *m1, geomPolyMap *m2);
+int geomPolyMapWithin(geomPolyMap *m1, geomPolyMap *m2);
 
 #if defined(__cplusplus)
 }

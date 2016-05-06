@@ -34,6 +34,7 @@
 #include <time.h>
 #include <ctype.h>
 #include "zmalloc.h"
+#include "test.h"
 #include "geom.h"
 
 char *randgeometrycollection(int vary, int dim);
@@ -624,26 +625,26 @@ int test_GeomIterator(){
     geomErr err = geomDecode(input, strlen(input), 0, &g, &sz);
     assert(err == GEOM_ERR_NONE);
     int count = 0;
-    geomIterator *itr = geomNewGeometryCollectionIterator(g);
-    assert(itr);
-    while (geomIteratorNext(itr)){
+    geomIterator itr;
+    err = geomGeometryCollectionIterator(g, &itr);
+    assert(err == GEOM_ERR_NONE);
+    while (geomIteratorNext(&itr)){
         geom ig;
         int sz;
-        assert(geomIteratorValues(itr, &ig, &sz));
+        assert(geomIteratorValues(&itr, &ig, &sz));
         if (geomGetType(ig) == GEOM_GEOMETRYCOLLECTION){
-            geomIterator *itr2 = geomNewGeometryCollectionIterator(ig);
-            assert(itr2);
-            while (geomIteratorNext(itr2)){
+            geomIterator itr2;
+            err = geomGeometryCollectionIterator(ig, &itr2);
+            assert(err==GEOM_ERR_NONE);
+            while (geomIteratorNext(&itr2)){
                 geom ig2;
                 int sz2;
-                assert(geomIteratorValues(itr2, &ig2, &sz2));
+                assert(geomIteratorValues(&itr2, &ig2, &sz2));
                 count++;
             }
-            geomFreeIterator(itr2);        
         }
         count++;
     }
-    geomFreeIterator(itr);
     int count2;
     geom *arr = geomGeometryCollectionFlattenedArray(g, &count2);
     assert(arr);
@@ -653,7 +654,59 @@ int test_GeomIterator(){
     return 1;
 }
 
+static geom decode(char *wkt){
+    geom g;
+    int sz;
+    geomErr err = geomDecodeWKT(wkt, 0, &g, &sz);
+    assert(err==GEOM_ERR_NONE);
+    return g;
+}
 
+int test_GeomPolyMapIntersects(){
+    geom g1 = decode("POLYGON((1 1, 1 9, 9 9, 9 1, 1 1))");
+    geom g2 = decode("POLYGON((5 5, 5 6, 6 6, 6 5, 5 5))");
+    geom g3 = decode("POLYGON((15 5, 15 6, 16 6, 16 5, 15 5))");
+    assert(g1 && g2 && g3);
+    geomPolyMap *m1 = geomNewPolyMap(g1);
+    geomPolyMap *m2 = geomNewPolyMap(g2);
+    geomPolyMap *m3 = geomNewPolyMap(g3);
+    assert(m1 && m2 && m3);
+
+    assert(geomPolyMapIntersects(m2, m1));
+    assert(!geomPolyMapIntersects(m3, m1));
+
+
+    geomFreePolyMap(m1);
+    geomFreePolyMap(m2);
+    geomFreePolyMap(m3);
+    geomFree(g1);
+    geomFree(g2);
+    geomFree(g3);
+    return 1;
+}
+
+int test_GeomPolyMapWithin(){
+    geom g1 = decode("POLYGON((1 1, 1 9, 9 9, 9 1, 1 1))");
+    geom g2 = decode("POLYGON((5 5, 5 6, 6 6, 6 5, 5 5))");
+    geom g3 = decode("POLYGON((15 5, 15 6, 16 6, 16 5, 15 5))");
+    assert(g1 && g2 && g3);
+    geomPolyMap *m1 = geomNewPolyMap(g1);
+    geomPolyMap *m2 = geomNewPolyMap(g2);
+    geomPolyMap *m3 = geomNewPolyMap(g3);
+    assert(m1 && m2 && m3);
+
+    assert(geomPolyMapWithin(m2, m1));
+    assert(!geomPolyMapWithin(m3, m1));
+
+
+    geomFreePolyMap(m1);
+    geomFreePolyMap(m2);
+    geomFreePolyMap(m3);
+    geomFree(g1);
+    geomFree(g2);
+    geomFree(g3);
+    return 1;
+}
 
 
 

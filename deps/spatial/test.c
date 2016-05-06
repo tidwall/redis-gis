@@ -68,6 +68,12 @@ int test_GeomPolyMapPointBenchSingleThreaded();
 int test_GeomPolyMapPolygonBenchSingleThreaded();
 int test_GeomPolyMapGeometryCollectionBenchSingleThreaded();
 
+int test_GeomPolyMapIntersects();
+int test_GeomPolyMapWithin();
+
+
+
+
 typedef struct test{
 	char *name;
 	int (*test)();
@@ -86,11 +92,14 @@ test tests[] = {
 	{ "geomGeometryCollection", test_GeomGeometryCollection },
 	{ "geomIterator", test_GeomIterator },
 	{ "geomPolyMap", test_GeomPolyMap },
+	
 	{ "rtreeInsert", test_RTreeInsert },
 	{ "rtreeSearch", test_RTreeSearch },
 	{ "rtreeRemove", test_RTreeRemove },
+
 	{ "geoutilDistance", test_GeoUtilDistance },
 	{ "geoutilDestination", test_GeoUtilDestination },
+
 	{ "polyRayInside", test_PolyRayInside },
 	{ "polyRayExteriorHoles", test_PolyRayExteriorHoles },
 	{ "polyInsideShapes", test_PolyInsideShapes },
@@ -99,12 +108,16 @@ test tests[] = {
 	{ "polyRectIntersects", test_PolyRectIntersects },
 	{ "polyRectInside", test_PolyRectInside },
 
-	{ "geomPolyMapPointBench", test_GeomPolyMapPointBench },
-	{ "geomPolyMapPolygonBench", test_GeomPolyMapPolygonBench },
-	{ "geomPolyMapGeomColBench", test_GeomPolyMapGeometryCollectionBench },
-	{ "geomPolyMapPointBenchSingleThreaded", test_GeomPolyMapPointBenchSingleThreaded },
-	{ "geomPolyMapPolygonBenchSingleThreaded", test_GeomPolyMapPolygonBenchSingleThreaded },
-	{ "geomPolyMapGeomColBenchSingleThreaded", test_GeomPolyMapGeometryCollectionBenchSingleThreaded },
+	{ "polyMapPointBench", test_GeomPolyMapPointBench },
+	{ "polyMapPolygonBench", test_GeomPolyMapPolygonBench },
+	{ "polyMapGeomColBench", test_GeomPolyMapGeometryCollectionBench },
+	{ "polyMapPointBenchSingleThreaded", test_GeomPolyMapPointBenchSingleThreaded },
+	{ "polyMapPolygonBenchSingleThreaded", test_GeomPolyMapPolygonBenchSingleThreaded },
+	{ "polyMapGeomColBenchSingleThreaded", test_GeomPolyMapGeometryCollectionBenchSingleThreaded },
+
+	{ "searchPolyMapIntersects", test_GeomPolyMapIntersects },
+	{ "searchPolyMapWithin", test_GeomPolyMapWithin },
+
 
 };
 

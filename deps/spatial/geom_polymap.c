@@ -73,7 +73,6 @@ static geomPolyMap *geomNewPolyMapBase(geom g, int singleThreaded){
 	geomPolyMap *m = NULL;
 	if (singleThreaded && (
 		h.type == GEOM_POINT || 
-		h.type == GEOM_MULTIPOINT || 
 		h.type == GEOM_LINESTRING || 
 		h.type == GEOM_POLYGON)
 	){
@@ -115,13 +114,11 @@ static geomPolyMap *geomNewPolyMapBase(geom g, int singleThreaded){
 
 	switch (h.type){
 	case GEOM_POINT:	
-	case GEOM_MULTIPOINT:
 	case GEOM_LINESTRING:
 		switch (h.type){
 		case GEOM_POINT:
 			m->ppoly.len = 1;
 			break;
-		case GEOM_MULTIPOINT:
 		case GEOM_LINESTRING:
 			m->ppoly.len = *((uint32_t*)ptr);
 			ptr+=4;
@@ -132,6 +129,7 @@ static geomPolyMap *geomNewPolyMapBase(geom g, int singleThreaded){
 		m->polygonCount = 1;
 		m->polygons = &m->ppoly;
 		m->holes = &m->pholes;
+		m->types = &m->type;
 		break;
 	case GEOM_POLYGON: 
 	single_polygon:{
@@ -152,6 +150,36 @@ static geomPolyMap *geomNewPolyMapBase(geom g, int singleThreaded){
 		m->polygonCount = 1;
 		m->polygons = &m->ppoly;
 		m->holes = &m->pholes;
+		m->types = &m->type;
+		break;
+	}
+	case GEOM_MULTIPOINT:{
+		int count = *((uint32_t*)ptr);
+		ptr+=4;
+		m->multipoly = 1;
+		m->polygonCount = count;
+		m->polygons = zmalloc(count*sizeof(polyPolygon));
+		if (!m->polygons){
+			goto err;
+		}
+		memset(m->polygons, 0, count*sizeof(polyPolygon));
+		m->holes = zmalloc(count*sizeof(polyMultiPolygon));
+		if (!m->holes){
+			goto err;
+		}
+		memset(m->holes, 0, count*sizeof(polyMultiPolygon));
+		m->types = zmalloc(count*sizeof(geomType));
+		if (!m->types){
+			goto err;
+		}
+		memset(m->types, 0, count*sizeof(geomType));
+		for (int i=0;i<count;i++){
+			m->polygons[i].len = 1;
+			m->polygons[i].dims = dims;
+			m->polygons[i].values = (double*)ptr;
+			ptr+=dims*8;
+			m->types[i] = GEOM_POINT; // reduce to a point
+		}
 		break;
 	}
 	case GEOM_MULTILINESTRING:{
@@ -169,12 +197,18 @@ static geomPolyMap *geomNewPolyMapBase(geom g, int singleThreaded){
 			goto err;
 		}
 		memset(m->holes, 0, count*sizeof(polyMultiPolygon));
+		m->types = zmalloc(count*sizeof(geomType));
+		if (!m->types){
+			goto err;
+		}
+		memset(m->types, 0, count*sizeof(geomType));
 		for (int i=0;i<count;i++){
 			m->polygons[i].len = *((uint32_t*)ptr);
 			ptr+=4;
 			m->polygons[i].dims = dims;
 			m->polygons[i].values = (double*)ptr;
 			ptr+=dims*8*m->polygons[i].len;
+			m->types[i] = GEOM_LINESTRING; // reduce to a linestring
 		}
 		break;
 	}
@@ -196,6 +230,11 @@ static geomPolyMap *geomNewPolyMapBase(geom g, int singleThreaded){
 			goto err;
 		}
 		memset(m->holes, 0, count*sizeof(polyMultiPolygon));
+		m->types = zmalloc(count*sizeof(geomType));
+		if (!m->types){
+			goto err;
+		}
+		memset(m->types, 0, count*sizeof(geomType));
 		for (int i=0;i<count;i++){
 			int count2 = *((uint32_t*)ptr);
 			ptr+=4;
@@ -217,6 +256,7 @@ static geomPolyMap *geomNewPolyMapBase(geom g, int singleThreaded){
 					ptr+=dims*8*count3;
 				}
 			}
+			m->types[i] = GEOM_POLYGON; // reduce to a polygon
 		}
 		break;
 	}
@@ -225,6 +265,7 @@ static geomPolyMap *geomNewPolyMapBase(geom g, int singleThreaded){
 		int len = 0;
 		polyPolygon *polygons = NULL;
 		polyMultiPolygon *holes = NULL;
+		geomType *types = NULL;
 		geomPolyMap *m2 = NULL;
 		polygons = zmalloc(cap*sizeof(polyPolygon));
 		if (!polygons){
@@ -232,6 +273,10 @@ static geomPolyMap *geomNewPolyMapBase(geom g, int singleThreaded){
 		}
 		holes = zmalloc(cap*sizeof(polyMultiPolygon));
 		if (!holes){
+			goto err2;
+		}
+		types = zmalloc(cap*sizeof(geomType));
+		if (!types){
 			goto err2;
 		}
 		for (int i=0;i<m->geomCount;i++){
@@ -251,12 +296,18 @@ static geomPolyMap *geomNewPolyMapBase(geom g, int singleThreaded){
 					if (!nholes){
 						goto err2;
 					}
+					geomType *ntypes = zrealloc(types, ncap*sizeof(geomType));
+					if (!ntypes){
+						goto err2;
+					}
 					polygons = npolygons;
 					holes = nholes;
+					types = ntypes;
 					cap = ncap;
 				}
 				polygons[len] = m2->polygons[j];
 				holes[len] = m2->holes[j];
+				types[len] = m2->types[j];
 				len++;
 			}
 			geomFreePolyMap(m2);	
@@ -266,6 +317,7 @@ static geomPolyMap *geomNewPolyMapBase(geom g, int singleThreaded){
 		m->polygonCount = len;
 		m->polygons = polygons;
 		m->holes = holes;
+		m->types = types;
 		break;
 	err2:
 		if (polygons){
@@ -273,6 +325,9 @@ static geomPolyMap *geomNewPolyMapBase(geom g, int singleThreaded){
 		}
 		if (holes){
 			zfree(holes);
+		}
+		if (types){
+			zfree(types);
 		}
 		if (m2){
 			geomFreePolyMap(m2);

@@ -992,8 +992,6 @@ int geomRectString(geomRect r, int withZ, int withM, char *str){
 
 #define FROM_GEOM_C
 #include "geom_levels.c"
-#include "geom_within.c"
-#include "geom_intersects.c"
 #include "geom_polymap.c"
 
 
@@ -1143,43 +1141,23 @@ int geomIsSimplePoint(geom g){
     return 0;
 }
 
-typedef struct geomIterator {
-    ghdr hdr;
-    int count;
-    uint8_t *ptr;
-    geom g;
-    int sz;
-
-    int idx;
-    int len;
-    int cap;
-    geom *fg;
-    int *fsz;
-    int fon;
-} geomIterator;
-
-geomIterator *geomNewGeometryCollectionIterator(geom g){
-    if (!g){
-        return NULL;
+geomErr geomGeometryCollectionIterator(geom g, geomIterator *itr){
+    if (!g || !itr){
+        return GEOM_ERR_INPUT;
     }
     uint8_t *ptr = (uint8_t*)g;
     ptr++;
     ghdr h = readhdr(ptr);
     if (h.type!=GEOM_GEOMETRYCOLLECTION){
-        return NULL;
+        return GEOM_ERR_INPUT;
     }
     ptr+=4;
     int count = *((uint32_t*)ptr);
     ptr+=4;
-    geomIterator *itr = zmalloc(sizeof(geomIterator));
-    if (!itr){
-        return NULL;
-    }
     memset(itr, 0, sizeof(geomIterator));
-    itr->hdr = h;
     itr->count = count; 
     itr->ptr = ptr;
-    return itr;
+    return GEOM_ERR_NONE;
 }
 
 int geomIteratorValues(geomIterator *itr, geom *g, int *sz){
@@ -1223,13 +1201,13 @@ int geomIteratorNext(geomIterator *itr){
         // nested geometry collection. but hey why not...
         // we have to iterate through it in order to get to the end of it.
         // sigh...
-        geomIterator *itr2 = geomNewGeometryCollectionIterator((geom)optr);
-        if (!itr2){
+        geomIterator itr2;
+        geomErr err = geomGeometryCollectionIterator((geom)optr, &itr2);
+        if (err != GEOM_ERR_NONE){
             return 0;
         }
-        while (geomIteratorNext(itr2));
-        itr->ptr = itr2->ptr;
-        geomFreeIterator(itr2);
+        while (geomIteratorNext(&itr2));
+        itr->ptr = itr2.ptr;
         break;
     }
     case GEOM_POINT:{
@@ -1274,24 +1252,11 @@ int geomIteratorNext(geomIterator *itr){
     return 1;
 }
 
-void geomFreeIterator(geomIterator *itr){
-    if (!itr){
-        return;
-    }
-    if (itr->fg){
-        zfree(itr->fg);
-    }
-    if (itr->fsz){
-        zfree(itr->fsz);
-    }
-    zfree(itr);
-}
-
 geom *geomGeometryCollectionFlattenedArray(geom g, int *count){
     geom *gg = NULL;
-    geomIterator *itr = NULL;
-    itr = geomNewGeometryCollectionIterator(g);
-    if (!itr){
+    geomIterator itr;
+    geomErr err = geomGeometryCollectionIterator(g, &itr);
+    if (err != GEOM_ERR_NONE){
         goto err;
     }
     gg = zmalloc(0);
@@ -1301,8 +1266,8 @@ geom *geomGeometryCollectionFlattenedArray(geom g, int *count){
     int len = 0;
     int cap = 0;
     geom ig = NULL;
-    while (geomIteratorNext(itr)){
-        if (!geomIteratorValues(itr, &ig, NULL)){
+    while (geomIteratorNext(&itr)){
+        if (!geomIteratorValues(&itr, &ig, NULL)){
             goto err;
         }
         int release = 0;
@@ -1338,17 +1303,158 @@ geom *geomGeometryCollectionFlattenedArray(geom g, int *count){
     if (count){
         *count = len;
     }
-    geomFreeIterator(itr);
     return gg;
 err:
     zfree(gg);
-    geomFreeIterator(itr);
     return NULL;
 }
-
 void geomFreeFlattenedArray(geom *garr){
     if (garr){
         zfree(garr);
     }
 }
+int geomCoordWithinRadius(geomCoord c, geomCoord center, double meters){
+    return geoutilDistance(c.y, c.x, center.y, center.x) <= meters ? 1 : 0;
+}
 
+static int pointWithin(polyPoint a, geomPolyMap *m){
+    for (int i=0;i<m->polygonCount;i++){
+        switch (m->types[i]){
+        default:
+            return 0;
+        case GEOM_POINT:{
+            polyPoint b = polyPolygonPoint(m->polygons[i],0);
+            if (a.x == b.x && a.y == b.y){
+                return 1;
+            }
+            break;
+        }
+        case GEOM_LINESTRING:
+            for (int j=1;j<m->polygons[i].len;j++){
+                polyPoint b = polyPolygonPoint(m->polygons[i],j);
+                polyPoint c = polyPolygonPoint(m->polygons[i],j);
+                if (polyRaycast(a, b, c)==RAY_ON){
+                    return 1;
+                }
+            }
+            break;
+        case GEOM_POLYGON:
+            if (polyPointInside(a, m->polygons[i], m->holes[i])){
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+static int lineIntersects(polyPoint a, polyPoint b, geomPolyMap *m){
+    for (int i=0;i<m->polygonCount;i++){
+        switch (m->types[i]){
+        default:
+            return 0;
+        case GEOM_POINT:{
+            polyPoint c = polyPolygonPoint(m->polygons[i],0);
+            if (polyRaycast(c, a, b)==RAY_ON){
+                return 1;
+            }
+            break;
+        }
+        case GEOM_LINESTRING:
+            for (int j=1;j<m->polygons[i].len;j++){
+                polyPoint c = polyPolygonPoint(m->polygons[i],j);
+                polyPoint d = polyPolygonPoint(m->polygons[i],j);
+                if (polyLinesIntersect(a,b,c,d)){
+                    return 1;
+                }
+            }
+            break;
+        case GEOM_POLYGON:
+            if (polyPointInside(a, m->polygons[i], m->holes[i])||
+                polyPointInside(b, m->polygons[i], m->holes[i])){
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+static int polygonIntersects(polyPolygon polygon, polyMultiPolygon holes, geomPolyMap *m){
+    for (int i=0;i<m->polygonCount;i++){
+        switch (m->types[i]){
+        default:
+            return 0;
+        case GEOM_POINT:{
+            polyPoint a = polyPolygonPoint(m->polygons[i],0);
+            if (polyPointInside(a, polygon, holes)){
+                return 1;
+            }
+            break;
+        }
+        case GEOM_LINESTRING:
+            for (int j=1;j<m->polygons[i].len;j++){
+                polyPoint a = polyPolygonPoint(m->polygons[i],j);
+                polyPoint b = polyPolygonPoint(m->polygons[i],j);
+                if (polyPointInside(a, polygon, holes)||
+                    polyPointInside(b, polygon, holes)){
+                    return 1;
+                }            
+            }
+            break;
+        case GEOM_POLYGON:
+            if (polyPolygonInside(polygon, m->polygons[i], m->holes[i])){
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+int geomPolyMapIntersects(geomPolyMap *m1, geomPolyMap *m2){
+    if (!m1 || !m2){
+        return 0;
+    }
+    for (int i=0;i<m1->polygonCount;i++){
+        switch (m1->types[i]){
+        default:
+            return 0;
+        case GEOM_POINT:
+            if (m1->polygons[i].len && 
+                pointWithin(polyPolygonPoint(m1->polygons[i], 0), m2)){
+                return 1;
+            }
+            break;
+        case GEOM_LINESTRING:
+            for (int j=1;j<m1->polygons[i].len;j++){
+                polyPoint a = polyPolygonPoint(m1->polygons[i],j);
+                polyPoint b = polyPolygonPoint(m1->polygons[i],j);
+                if (lineIntersects(a, b, m2)){
+                    return 1;
+                }
+            }
+            break;
+        case GEOM_POLYGON:
+            if (polygonIntersects(m1->polygons[i], m1->holes[i], m2)){
+                return 1;
+            }
+            break;
+        }
+    }
+    return 0;
+}
+
+int geomPolyMapWithin(geomPolyMap *m1, geomPolyMap *m2){
+    if (!m1 || !m2){
+        return 0;
+    }
+    if (m1->polygonCount==0){
+        return 0;
+    }
+    for (int i=0;i<m1->polygonCount;i++){
+        for (int j=0;j<m1->polygons[i].len;j++){
+            if (!pointWithin(polyPolygonPoint(m1->polygons[i],j),m2)){
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
