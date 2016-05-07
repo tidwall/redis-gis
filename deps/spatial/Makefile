@@ -11,7 +11,7 @@ R_LD=$(CC) $(R_LDFLAGS)
 
 all: geom.o grisu3.o rtree.o geoutil.o \
 	 poly.o polyinside.o polyraycast.o polyintersects.o \
-	 hash.o bing.o
+	 hash.o bing.o json.o
 testapp: all
 	-@$(R_CC) -o test test.c grisu3.o -I. \
 		geom_test.c geom.o \
@@ -25,7 +25,7 @@ test: testapp
 
 .PHONY: all
 
-geom.o: geom.h geom.c geom_levels.c geom_polymap.c
+geom.o: geom.h geom.c geom_levels.c geom_polymap.c geom_json.c
 grisu3.o: grisu3.h grisu3.c
 rtree.o: rtree.h rtree.c rtree_tmpl.c
 geoutil.o: geoutil.h geoutil.c
@@ -35,6 +35,7 @@ polyraycast.o: poly.h polyraycast.c
 polyintersects.o: poly.h polyintersects.c
 hash.o: hash.h hash.c
 bing.o: bing.h bing.c
+json.o: json.h json.c
 
 .c.o:
 	$(R_CC) -c $<

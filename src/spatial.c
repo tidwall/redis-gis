@@ -1217,6 +1217,16 @@ void gsearchCommand(client *c){
                         }
                         break;
                     }
+                    case OUTPUT_JSON:{
+                        char *json = geomEncodeJSON((geom)ctx.results[i].value);
+                        if (!json){
+                            addReplyBulkCBuffer(c, "", 0);
+                        } else {
+                            addReplyBulkCBuffer(c, json, strlen(json));
+                            geomFreeJSON(json);
+                        }
+                        break;
+                    }
                     case OUTPUT_WKB:
                         addReplyBulkCBuffer(c, ctx.results[i].value, ctx.results[i].valueLen);
                         break;

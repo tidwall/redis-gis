@@ -36,6 +36,7 @@
 #include "grisu3.h"
 #include "geoutil.h"
 #include "poly.h"
+#include "json.h"
 static geomErr geomDecodeWKTInner(const char *input, geomWKTDecodeOpts opts, geom *g, int *size, int *read);
 
 typedef struct ctx{
@@ -860,6 +861,221 @@ char *geomEncodeWKT(geom g, geomWKTEncodeOpts opts){
     return geomEncodeWKTInner(g, opts, NULL);
 }
 
+static char *geomEncodeJSONInner(geom g, int *read){
+    #define JSON_APPEND(s) {if (!(str = appendStr(str, &size, &cap, (s)))) goto oom;}
+    #define JSON_APPEND_COORD(){\
+        JSON_APPEND(dstr(*((double*)gb), output));\
+        gb += 8;\
+        JSON_APPEND(",");\
+        JSON_APPEND(dstr(*((double*)gb), output));\
+        gb += 8;\
+        if (isZ){\
+            JSON_APPEND(",");\
+            JSON_APPEND(dstr(*((double*)gb), output));\
+            gb += 8;\
+        }\
+        if (isM){\
+            if (!isZ){\
+                JSON_APPEND(",0");\
+            }\
+            JSON_APPEND(",");\
+            JSON_APPEND(dstr(*((double*)gb), output));\
+            gb += 8;\
+        }\
+    }
+    #define JSON_APPEND_HEAD(type){\
+        APPEND("{\"type\":\"");\
+        APPEND(type);\
+        APPEND("\",\"coordinates\":");\
+        gb+=5;\
+    }
+    #define JSON_APPEND_HEAD_COLL(type){\
+        APPEND("{\"type\":\"");\
+        APPEND(type);\
+        APPEND("\",\"geometries\":");\
+        gb+=5;\
+    }
+
+    #define JSON_APPEND_HEAD_SERIES(type){\
+        JSON_APPEND_HEAD(type);\
+        len = *((uint32_t*)(gb));\
+        gb+=4;\
+        if (len == 0){\
+            APPEND("[]}");\
+            break;\
+        }\
+    }
+    #define JSON_APPEND_HEAD_SERIES_COLL(type){\
+        JSON_APPEND_HEAD_COLL(type);\
+        len = *((uint32_t*)(gb));\
+        gb+=4;\
+        if (len == 0){\
+            APPEND("[]}");\
+            break;\
+        }\
+    }
+
+
+
+    if (g == NULL){
+        return NULL;
+    }
+    char *str = NULL;
+    int size = 0;
+    int cap = 0;
+    char output[50];
+    uint8_t *gb = (uint8_t*)g;
+    int isZ = geomIsZ(gb);
+    int isM = geomIsM(gb);
+    int len = 0;
+    int showZM = (isM||isZ);
+    char *json = NULL;
+
+    int coordSize = 16;
+    if (isZ){
+        coordSize+=8;
+    }
+    if (isM){
+        coordSize+=8;
+    }
+    geomType type = geomGetType(g);
+    switch (type){
+    default:
+        return NULL;
+    case GEOM_POINT:
+        JSON_APPEND_HEAD("Point");
+        JSON_APPEND("[")
+        JSON_APPEND_COORD();
+        JSON_APPEND("]}");
+        break;
+    case GEOM_LINESTRING:
+    case GEOM_MULTIPOINT:
+        if (type == GEOM_LINESTRING){
+            JSON_APPEND_HEAD_SERIES("LineString");
+        } else {
+            JSON_APPEND_HEAD_SERIES("MultiPoint");
+        }
+        JSON_APPEND("[")
+        for (int i=0;i<len;i++){
+            if (i!=0){
+                JSON_APPEND(",");    
+            }
+            JSON_APPEND("[")
+            JSON_APPEND_COORD();
+            JSON_APPEND("]");
+        }
+        JSON_APPEND("]}");
+        break;
+    case GEOM_POLYGON:
+    case GEOM_MULTILINESTRING:
+        if (type == GEOM_POLYGON){
+            JSON_APPEND_HEAD_SERIES("Polygon");
+        } else {
+            JSON_APPEND_HEAD_SERIES("MultiLineString");
+        }
+        JSON_APPEND("[")
+        for (int i=0;i<len;i++){
+            if (i!=0){
+                JSON_APPEND(",");
+            }
+            int len2 = *((uint32_t*)gb);
+            gb += 4;
+            JSON_APPEND("[");
+            for (int i=0;i<len2;i++){
+                if (i!=0){
+                    JSON_APPEND(",");
+                }
+                JSON_APPEND("[");
+                JSON_APPEND_COORD();
+                JSON_APPEND("]");
+            }
+            JSON_APPEND("]");
+        }
+        JSON_APPEND("]}");
+        break;
+    case GEOM_MULTIPOLYGON:
+        JSON_APPEND_HEAD_SERIES("MultiPolygon");
+        JSON_APPEND("[")
+        for (int i=0;i<len;i++){
+            if (i!=0){
+                JSON_APPEND(",");
+            }
+            int len2 = *((uint32_t*)gb);
+            gb += 4;
+            JSON_APPEND("[");
+            for (int i=0;i<len2;i++){
+                if (i!=0){
+                    JSON_APPEND(",");
+                }
+                int len3 = *((uint32_t*)gb);
+                gb += 4;
+                JSON_APPEND("[");
+                for (int i=0;i<len3;i++){
+                    if (i!=0){
+                        JSON_APPEND(",");
+                    }
+                    JSON_APPEND("[");
+                    JSON_APPEND_COORD();
+                    JSON_APPEND("]");
+                }
+                JSON_APPEND("]");
+            }
+            JSON_APPEND("]");
+        }
+        JSON_APPEND("]}");
+        break;
+    case GEOM_GEOMETRYCOLLECTION:
+        JSON_APPEND_HEAD_SERIES_COLL("GeometryCollection");
+        JSON_APPEND("[");
+        for (int i=0;i<len;i++){
+            if (i!=0){
+                JSON_APPEND(",");
+            }
+            int read = 0;
+            json = geomEncodeJSONInner((geom)gb, &read);
+            if (!json){
+                goto oom;
+            }
+            gb += read;
+            JSON_APPEND(json);
+            geomFreeJSON(json);
+            json = NULL;
+        }
+        APPEND("]}");
+        break;
+    }
+    if (read){
+        *read = (void*)gb-(void*)g;
+    }
+    if (json){
+        geomFreeJSON(json);
+    }
+    return str;
+oom:
+    if (str){
+        zfree(str);
+    }
+    if (json){
+        geomFreeJSON(json);
+    }
+    return NULL;
+}
+
+
+
+
+char *geomEncodeJSON(geom g){
+    return geomEncodeJSONInner(g, NULL);
+}
+
+void geomFreeJSON(char *json){
+    if (json){
+        zfree(json);
+    }
+}
+
+
+
 geomErr geomDecodeWKT(const char *input, geomWKTDecodeOpts opts, geom *g, int *size){
     return geomDecodeWKTInner(input, opts, g, size, NULL);
 }
@@ -993,6 +1209,7 @@ int geomRectString(geomRect r, int withZ, int withM, char *str){
 #define FROM_GEOM_C
 #include "geom_levels.c"
 #include "geom_polymap.c"
+#include "geom_json.c"
 
 
 // geomGetCoord return any coord that is contained somewhere within the specified geometry.
@@ -1043,6 +1260,30 @@ err:
     return err;
 }
 
+
+
+
+geomErr geomDecodeJSON(const void *input, size_t length, geom *g, int *size){
+    geomErr err;
+    json_value *value = json_parse(input, length);
+    if (!value){
+        err = GEOM_ERR_INPUT;
+        goto err;
+    }
+    int res = jsonDecodeAny(value, g, size);
+    if (!res){
+        err = GEOM_ERR_INPUT;
+        goto err;
+    }
+    json_value_free(value);
+    return GEOM_ERR_NONE;
+err:
+    if (value){
+        json_value_free(value);
+    }
+    return err;
+}
+
 geomErr geomDecode(const void *input, size_t length, geomWKTDecodeOpts opts, geom *g, int *size){
     char *bytes = (char*)input;
     if (length > 0){
@@ -1052,8 +1293,7 @@ geomErr geomDecode(const void *input, size_t length, geomWKTDecodeOpts opts, geo
         case 0: case 1:
             return geomDecodeWKB(input, length, g, size);
         case '{':
-            // future geojson support
-            return GEOM_ERR_UNSUPPORTED;
+            return geomDecodeJSON(input, length, g, size);
         case '\t': case ' ': case '\r': case '\v': case '\n': case '\f':
             for (int i=0;i<length;i++){
                 switch (bytes[i]){

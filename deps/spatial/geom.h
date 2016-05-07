@@ -89,8 +89,12 @@ geomErr geomDecodeWKT(const char *input, geomWKTDecodeOpts opts, geom *g, int *s
 geomErr geomDecodeWKB(const void *input, size_t length, geom *g, int *size);
 geomErr geomDecode(const void *input, size_t length, geomWKTDecodeOpts opts, geom *g, int *size);
 void geomFree(geom g);
+
 char *geomEncodeWKT(geom g, geomWKTEncodeOpts opts);
 void geomFreeWKT(char *wkt);
+char *geomEncodeJSON(geom g);
+void geomFreeJSON(char *json);
+
 geomType geomGetType(geom g);
 geomCoord geomCenter(geom g);
 geomRect geomBounds(geom g);

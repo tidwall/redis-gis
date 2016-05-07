@@ -157,6 +157,7 @@ sparkline.o: sparkline.c server.h fmacros.h config.h solarisfixes.h \
  sparkline.h quicklist.h zipmap.h sha1.h endianconv.h crc64.h rdb.h rio.h
 spatial.o: spatial.c spatial.h server.h \
  ../deps/spatial/geom.c ../deps/spatial/geom.h ../deps/spatial/geom_levels.c \
+ ../deps/spatial/geom_json.c \
  ../deps/spatial/geom_polymap.c ../deps/spatial/geoutil.c \
  ../deps/spatial/geoutil.h ../deps/spatial/grisu3.c ../deps/spatial/poly.c \
  ../deps/spatial/poly.h ../deps/spatial/polyinside.c \
