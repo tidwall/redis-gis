@@ -799,8 +799,7 @@ static int searchIterator(double minX, double minY, double maxX, double maxY, vo
 
     searchContext *ctx = userdata;
 
-    // retreive the key
-
+    // retreive the field
     uint64_t nidx = (uint64_t)item;
     sds sidx = sdsnewlen(&nidx, 8);
     unsigned char *vstr = NULL;
@@ -811,7 +810,7 @@ static int searchIterator(double minX, double minY, double maxX, double maxY, vo
     if (res == C_ERR){
         return 1;
     }
-    sds field = sdsnewlen(vstr, vlen);
+    sds field = sdsnewlen(vstr, vlen); // this must be released at some point.
 
     // retreive the geom
     sds value = hashTypeGetRaw(ctx->s->h, field);
@@ -822,7 +821,8 @@ static int searchIterator(double minX, double minY, double maxX, double maxY, vo
     geom g = (geom)value;
 
     int match = 0;
-    if ((ctx->targetType == RADIUS) && (ctx->searchType==WITHIN || geomIsSimplePoint(g))){
+    if (geomIsSimplePoint(g) && ctx->targetType == RADIUS){
+        printf("radius: %s\n", field);
         match = geomCoordWithinRadius(geomCenter(g), ctx->center, ctx->meters);
     } else {
         geomPolyMap *m = geomNewPolyMapSingleThreaded(g);
@@ -831,8 +831,10 @@ static int searchIterator(double minX, double minY, double maxX, double maxY, vo
             return 1;
         }
         if (ctx->searchType==WITHIN){
+            printf("within: %s\n", field);
             match = geomPolyMapWithin(m, ctx->m);
         } else {
+            printf("intersects: %s\n", field);
             match = geomPolyMapIntersects(m, ctx->m);
         }
         geomFreePolyMap(m);
@@ -992,9 +994,15 @@ void gsearchCommand(client *c){
         ctx.bounds = geomBounds(ctx.g);
         i+=3;
     } else {
-        addReplyError(c, "invalid geometry");
+        addReplyError(c, "invalid arguments for 'gsearch' command");
         return;
     }
+
+    if (i < c->argc){
+        addReplyError(c, "wrong number of arguments for 'gsearch' command");
+        goto done;
+    }
+
     if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.emptymultibulk)) == NULL || checkType(c,o,OBJ_SPATIAL)) {
         goto done;
     }
