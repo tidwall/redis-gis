@@ -777,6 +777,20 @@ static int strieq(const char *str1, const char *str2){
 #define OUTPUT_QUAD     9
 #define OUTPUT_TILE    10
 
+#define FENCE_ENTER    (1<<1)
+#define FENCE_EXIT     (1<<2)
+#define FENCE_CROSS    (1<<3)
+#define FENCE_INSIDE   (1<<4)
+#define FENCE_OUTSIDE  (1<<5)
+#define FENCE_KEYDEL   (1<<6)
+#define FENCE_FIELDDEL (1<<7)
+#define FENCE_FLUSH    (1<<8)
+#define FENCE_ALL      (FENCE_ENTER|FENCE_EXIT|FENCE_CROSS|\
+                       FENCE_INSIDE|FENCE_OUTSIDE|FENCE_KEYDEL|\
+                       FENCE_FIELDDEL|FENCE_FIELDDEL)
+
+
+
 typedef struct resultItem {
     char *field;
     int fieldLen;
@@ -800,6 +814,7 @@ typedef struct searchContext {
     int output;
     int precision;
     int nofields;
+    int fence;
 
     // bounds
     geomRect bounds;
@@ -909,6 +924,7 @@ static void addInvalidSearchReplyError(client *c){
 //   [WITHIN|INTERSECTS] 
 //   [CURSOR cursor]
 //   [MATCH pattern]
+//   [FENCE ENTER|EXIT|INSIDE|OUTSIDE|ALL]
 //   [OUTPUT COUNT|FIELD|WKT|WKB|JSON|POINT|BOUNDS|(HASH precision)|(QUAD level)|(TILE z)]
 //   (MEMBER key field)|
 //      (BOUNDS minlon minlat maxlon maxlat)|
@@ -934,6 +950,7 @@ void gsearchCommand(client *c){
     int geomon = 0;
     int matchon = 0;
     int outputon = 0;
+    int fenceon = 0;
     
     for (;i<c->argc;){
         /* TYPE */
@@ -955,6 +972,20 @@ void gsearchCommand(client *c){
             }
             ctx.pattern = c->argv[i+1]->ptr;
             ctx.allfields = (ctx.pattern[0] == '*' && ctx.pattern[1] == '\0');
+            i+=2;
+        }
+        /* FENCE */
+        else if (strieq(c->argv[i]->ptr, "fence")){
+            CHECKON(fenceon);
+            if (i>=c->argc-1){
+                addReplyError(c, "need fence type");
+                goto done;
+            }
+            if (!strieq(c->argv[i+1]->ptr, "all")){
+                addReplyError(c, "fence type must be 'all'");
+                goto done;
+            }
+            ctx.fence = FENCE_ALL;
             i+=2;
         }
         /* OUTPUT */
@@ -1182,92 +1213,96 @@ void gsearchCommand(client *c){
             goto done;
         }
     }
+    if (ctx.fence){
+        printf("123\n");
+        c->flags |= CLIENT_PUBSUB;
+    } else {
+        char output[128];
 
-    char output[128];
-
-    ctx.s = o->ptr;
-    if (!cursoron||ctx.cursor==0){ // ATM only zero cursor is allowed
-       rtreeSearch(ctx.s->tr, ctx.bounds.min.x, ctx.bounds.min.y, ctx.bounds.max.x, ctx.bounds.max.y, searchIterator, &ctx);
-    }
-    if (!ctx.fail){
-        if (ctx.output == OUTPUT_COUNT) {
-            addReplyLongLong(c, ctx.len);
-        } else {
-            addReplyMultiBulkLen(c, 2);
-            addReplyBulkLongLong(c, 0); // future cursor support
-            if (ctx.output == OUTPUT_FIELD){
-                addReplyMultiBulkLen(c, ctx.len);
+        ctx.s = o->ptr;
+        if (!cursoron||ctx.cursor==0){ // ATM only zero cursor is allowed
+           rtreeSearch(ctx.s->tr, ctx.bounds.min.x, ctx.bounds.min.y, ctx.bounds.max.x, ctx.bounds.max.y, searchIterator, &ctx);
+        }
+        if (!ctx.fail){
+            if (ctx.output == OUTPUT_COUNT) {
+                addReplyLongLong(c, ctx.len);
             } else {
-                addReplyMultiBulkLen(c, ctx.len*2);
-            }
-            for (int i=0;i<ctx.len;i++){
-                addReplyBulkCBuffer(c, ctx.results[i].field, ctx.results[i].fieldLen);
-                if (ctx.output != OUTPUT_FIELD){
-                    switch (ctx.output){
-                    default:
-                        addReplyBulkCBuffer(c, "", 0);
-                        break;
-                    case OUTPUT_WKT:{
-                        char *wkt = geomEncodeWKT((geom)ctx.results[i].value, 0);
-                        if (!wkt){
+                addReplyMultiBulkLen(c, 2);
+                addReplyBulkLongLong(c, 0); // future cursor support
+                if (ctx.output == OUTPUT_FIELD){
+                    addReplyMultiBulkLen(c, ctx.len);
+                } else {
+                    addReplyMultiBulkLen(c, ctx.len*2);
+                }
+                for (int i=0;i<ctx.len;i++){
+                    addReplyBulkCBuffer(c, ctx.results[i].field, ctx.results[i].fieldLen);
+                    if (ctx.output != OUTPUT_FIELD){
+                        switch (ctx.output){
+                        default:
                             addReplyBulkCBuffer(c, "", 0);
-                        } else {
-                            addReplyBulkCBuffer(c, wkt, strlen(wkt));
-                            geomFreeWKT(wkt);
+                            break;
+                        case OUTPUT_WKT:{
+                            char *wkt = geomEncodeWKT((geom)ctx.results[i].value, 0);
+                            if (!wkt){
+                                addReplyBulkCBuffer(c, "", 0);
+                            } else {
+                                addReplyBulkCBuffer(c, wkt, strlen(wkt));
+                                geomFreeWKT(wkt);
+                            }
+                            break;
                         }
-                        break;
-                    }
-                    case OUTPUT_JSON:{
-                        char *json = geomEncodeJSON((geom)ctx.results[i].value);
-                        if (!json){
-                            addReplyBulkCBuffer(c, "", 0);
-                        } else {
-                            addReplyBulkCBuffer(c, json, strlen(json));
-                            geomFreeJSON(json);
+                        case OUTPUT_JSON:{
+                            char *json = geomEncodeJSON((geom)ctx.results[i].value);
+                            if (!json){
+                                addReplyBulkCBuffer(c, "", 0);
+                            } else {
+                                addReplyBulkCBuffer(c, json, strlen(json));
+                                geomFreeJSON(json);
+                            }
+                            break;
                         }
-                        break;
-                    }
-                    case OUTPUT_WKB:
-                        addReplyBulkCBuffer(c, ctx.results[i].value, ctx.results[i].valueLen);
-                        break;
-                    case OUTPUT_POINT:{
-                        geomCoord center = geomCenter((geom)ctx.results[i].value);
-                        addReplyMultiBulkLen(c, 2);
-                        addReplyDouble(c, center.x);
-                        addReplyDouble(c, center.y);
-                        break;
-                    }
-                    case OUTPUT_BOUNDS:{
-                        geomRect bounds = geomBounds((geom)ctx.results[i].value);
-                        addReplyMultiBulkLen(c, 4);
-                        addReplyDouble(c, bounds.min.x);
-                        addReplyDouble(c, bounds.min.y);
-                        addReplyDouble(c, bounds.max.x);
-                        addReplyDouble(c, bounds.max.y);
-                        break;
-                    }
-                    case OUTPUT_HASH:{
-                        geomCoord center = geomCenter((geom)ctx.results[i].value);
-                        hashEncode(center.x, center.y, ctx.precision, output);
-                        addReplyBulkCBuffer(c, output, strlen(output));
-                        break;
-                    }
-                    case OUTPUT_QUAD:{
-                        geomCoord center = geomCenter((geom)ctx.results[i].value);
-                        bingLatLongToQuadKey(center.y, center.x, ctx.precision, output);
-                        addReplyBulkCBuffer(c, output, strlen(output));
-                        break;
-                    }
-                    case OUTPUT_TILE:{
-                        geomCoord center = geomCenter((geom)ctx.results[i].value);
-                        int x, y;
-                        bingLatLonToTileXY(center.y, center.x, ctx.precision, &x, &y);
-                        addReplyMultiBulkLen(c, 2);
-                        addReplyDouble(c, x);
-                        addReplyDouble(c, y);
-                        break;
-                    }
+                        case OUTPUT_WKB:
+                            addReplyBulkCBuffer(c, ctx.results[i].value, ctx.results[i].valueLen);
+                            break;
+                        case OUTPUT_POINT:{
+                            geomCoord center = geomCenter((geom)ctx.results[i].value);
+                            addReplyMultiBulkLen(c, 2);
+                            addReplyDouble(c, center.x);
+                            addReplyDouble(c, center.y);
+                            break;
+                        }
+                        case OUTPUT_BOUNDS:{
+                            geomRect bounds = geomBounds((geom)ctx.results[i].value);
+                            addReplyMultiBulkLen(c, 4);
+                            addReplyDouble(c, bounds.min.x);
+                            addReplyDouble(c, bounds.min.y);
+                            addReplyDouble(c, bounds.max.x);
+                            addReplyDouble(c, bounds.max.y);
+                            break;
+                        }
+                        case OUTPUT_HASH:{
+                            geomCoord center = geomCenter((geom)ctx.results[i].value);
+                            hashEncode(center.x, center.y, ctx.precision, output);
+                            addReplyBulkCBuffer(c, output, strlen(output));
+                            break;
+                        }
+                        case OUTPUT_QUAD:{
+                            geomCoord center = geomCenter((geom)ctx.results[i].value);
+                            bingLatLongToQuadKey(center.y, center.x, ctx.precision, output);
+                            addReplyBulkCBuffer(c, output, strlen(output));
+                            break;
+                        }
+                        case OUTPUT_TILE:{
+                            geomCoord center = geomCenter((geom)ctx.results[i].value);
+                            int x, y;
+                            bingLatLonToTileXY(center.y, center.x, ctx.precision, &x, &y);
+                            addReplyMultiBulkLen(c, 2);
+                            addReplyDouble(c, x);
+                            addReplyDouble(c, y);
+                            break;
+                        }
 
+                        }
                     }
                 }
             }
