@@ -33,6 +33,8 @@
 #include "rtree.h"
 #include "geoutil.h"
 #include "geom.h"
+#include "hash.h"
+#include "bing.h"
 
 
 int hashTypeGetValue(robj *o, sds field, unsigned char **vstr, unsigned int *vlen, long long *vll);
@@ -764,9 +766,23 @@ static int strieq(const char *str1, const char *str2){
 #define GEOMETRY   2
 #define BOUNDS     3
 
+#define OUTPUT_COUNT    1
+#define OUTPUT_FIELD    2
+#define OUTPUT_WKT      3
+#define OUTPUT_WKB      4
+#define OUTPUT_JSON     5
+#define OUTPUT_POINT    6
+#define OUTPUT_BOUNDS   7
+#define OUTPUT_HASH     8
+#define OUTPUT_QUAD     9
+#define OUTPUT_TILE    10
+
 typedef struct resultItem {
-    sds field;
-    sds value;
+    char *field;
+    int fieldLen;
+    char *value;
+    int valueLen;
+
 } resultItem;
 
 typedef struct searchContext {
@@ -779,6 +795,11 @@ typedef struct searchContext {
     int cap;
     resultItem *results;
     long long cursor;
+    sds pattern;
+    int allfields;
+    int output;
+    int precision;
+    int nofields;
 
     // bounds
     geomRect bounds;
@@ -810,37 +831,42 @@ static int searchIterator(double minX, double minY, double maxX, double maxY, vo
     if (res == C_ERR){
         return 1;
     }
-    sds field = sdsnewlen(vstr, vlen); // this must be released at some point.
-
-    // retreive the geom
-    sds value = hashTypeGetRaw(ctx->s->h, field);
-    if (!value){
-        sdsfree(field);
+    if (!(ctx->allfields || 
+        stringmatchlen(ctx->pattern,sdslen(ctx->pattern),(const char*)vstr,vlen,0))) {
         return 1;
     }
+    char *field = (char*)vstr;
+    int fieldLen = vlen;
+    sds sfield = sdsnewlen(field, fieldLen);
+
+
+    // retreive the geom
+    res = hashTypeGetValue(ctx->s->h, sfield, &vstr, &vlen, &vll);
+    sdsfree(sfield);
+    if (res == C_ERR){
+        return 1;
+    }
+    char *value = (char*)vstr;
+    int valueLen = vlen;
+
     geom g = (geom)value;
 
     int match = 0;
     if (geomIsSimplePoint(g) && ctx->targetType == RADIUS){
-        printf("radius: %s\n", field);
         match = geomCoordWithinRadius(geomCenter(g), ctx->center, ctx->meters);
     } else {
         geomPolyMap *m = geomNewPolyMapSingleThreaded(g);
         if (!m){
-            sdsfree(field);
             return 1;
         }
         if (ctx->searchType==WITHIN){
-            printf("within: %s\n", field);
             match = geomPolyMapWithin(m, ctx->m);
         } else {
-            printf("intersects: %s\n", field);
             match = geomPolyMapIntersects(m, ctx->m);
         }
         geomFreePolyMap(m);
     }
     if (!match){
-        sdsfree(field);
         return 1;
     }
     // append item
@@ -855,28 +881,40 @@ static int searchIterator(double minX, double minY, double maxX, double maxY, vo
         if (!nresults){
             addReplyError(ctx->c, "out of memory");
             ctx->fail = 1;
-            sdsfree(field);
             return 0;
         }
         ctx->results = nresults;
         ctx->cap = ncap;
     }
-    ctx->results[ctx->len].field = field;    // gets released on reply
-    ctx->results[ctx->len].value = value;  // gets released on reply
+    ctx->results[ctx->len].field = field;    
+    ctx->results[ctx->len].fieldLen = fieldLen;
+    ctx->results[ctx->len].value = value;  
+    ctx->results[ctx->len].valueLen = valueLen;  
     ctx->len++;
     return 1;
 }
+
+static void addInvalidSearchReplyError(client *c){
+    addReplyError(c, "invalid arguments for 'gsearch' command"); \
+}
+
+#define CHECKON(which) \
+    if ((which)){ \
+        addInvalidSearchReplyError(c); \
+        goto done; \
+    } \
+    (which) = 1;
 
 // GSEARCH key 
 //   [WITHIN|INTERSECTS] 
 //   [CURSOR cursor]
 //   [MATCH pattern]
-//   [OUTPUT COUNT|FIELD|WKT|WKB|GEOJSON|POINT|BOUNDS|(HASH precision)]
+//   [OUTPUT COUNT|FIELD|WKT|WKB|JSON|POINT|BOUNDS|(HASH precision)|(QUAD level)|(TILE z)]
 //   (MEMBER key field)|
 //      (BOUNDS minlon minlat maxlon maxlat)|
-//      (GEOMETRY geojson)|
+//      (GEOMETRY wkt|wkb|json)|
 //      (TILE x y z)|
-//      (QUADKEY quadkey)|
+//      (QUAD key)|
 //      (HASH geohash)
 //      (RADIUS lon lat meters)
 void gsearchCommand(client *c){
@@ -887,120 +925,250 @@ void gsearchCommand(client *c){
     ctx.c = c;
     ctx.searchType = INTERSECTS;
     ctx.cursor = -1;
+    ctx.allfields = 1;
+    ctx.output = OUTPUT_WKT;
     int i = 2;
+
+    int typeon = 0;
+    int cursoron = 0;
+    int geomon = 0;
+    int matchon = 0;
+    int outputon = 0;
     
-    if (i<c->argc){
+    for (;i<c->argc;){
+        /* TYPE */
         if (strieq(c->argv[i]->ptr, "within")){
+            CHECKON(typeon);
             ctx.searchType = WITHIN;
             i++;
         } else if (strieq(c->argv[i]->ptr, "intersects")){
+            CHECKON(typeon);
             ctx.searchType = INTERSECTS;
             i++;
+        } 
+        /* MATCH */
+        else if (strieq(c->argv[i]->ptr, "match")){
+            CHECKON(matchon);
+            if (i>=c->argc-1){
+                addReplyError(c, "need match pattern");
+                goto done;
+            }
+            ctx.pattern = c->argv[i+1]->ptr;
+            ctx.allfields = (ctx.pattern[0] == '*' && ctx.pattern[1] == '\0');
+            i+=2;
         }
-    }
-    if (i<c->argc){
-        if (strieq(c->argv[i]->ptr, "cursor")){
+        /* OUTPUT */
+        else if (strieq(c->argv[i]->ptr, "output")){
+            CHECKON(outputon);
+            if (i>=c->argc-1){
+                addReplyError(c, "need output type (count,field,wkt,wkb,json,point,bounds,hash)");
+                goto done;
+            }
+            if (strieq(c->argv[i+1]->ptr, "count")){
+                ctx.output = OUTPUT_COUNT;
+            } else if (strieq(c->argv[i+1]->ptr, "field")){
+                ctx.output = OUTPUT_FIELD;
+            } else if (strieq(c->argv[i+1]->ptr, "wkt")){
+                ctx.output = OUTPUT_WKT;
+            } else if (strieq(c->argv[i+1]->ptr, "wkb")){
+                ctx.output = OUTPUT_WKB;
+            } else if (strieq(c->argv[i+1]->ptr, "json")){
+                ctx.output = OUTPUT_JSON;
+            } else if (strieq(c->argv[i+1]->ptr, "point")){
+                ctx.output = OUTPUT_POINT;
+            } else if (strieq(c->argv[i+1]->ptr, "bounds")){
+                ctx.output = OUTPUT_BOUNDS;
+            } else if (strieq(c->argv[i+1]->ptr, "hash")){
+                ctx.output = OUTPUT_HASH;
+                if (i>=c->argc-2){
+                    addReplyError(c, "need hash precision");
+                    goto done;
+                }
+                long precision = 0;
+                if (getLongFromObjectOrReply(c, c->argv[i+2], &precision, "need numeric precision") != C_OK) return;
+                if (precision < 1 || precision > 22){
+                    addReplyError(c, "invalid hash precision");
+                    goto done;
+                }
+                ctx.precision = (int)precision;
+                i++;
+            } else if (strieq(c->argv[i+1]->ptr, "quad")){
+                ctx.output = OUTPUT_QUAD;
+                if (i>=c->argc-2){
+                    addReplyError(c, "need quad level");
+                    goto done;
+                }
+                long precision = 0;
+                if (getLongFromObjectOrReply(c, c->argv[i+2], &precision, "need numeric level") != C_OK) return;
+                if (precision < 1 || precision > 22){
+                    addReplyError(c, "invalid quad level");
+                    goto done;
+                }
+                ctx.precision = (int)precision;
+                i++;
+            } else if (strieq(c->argv[i+1]->ptr, "tile")){
+                ctx.output = OUTPUT_TILE;
+                if (i>=c->argc-2){
+                    addReplyError(c, "need tile z");
+                    goto done;
+                }
+                long precision = 0;
+                if (getLongFromObjectOrReply(c, c->argv[i+2], &precision, "need numeric z") != C_OK) return;
+                if (precision < 1 || precision > 22){
+                    addReplyError(c, "invalid tile z");
+                    goto done;
+                }
+                ctx.precision = (int)precision;
+                i++;
+            } else {
+                addInvalidSearchReplyError(c);
+                goto done;
+            }
+            i+=2;
+        }
+        /* CURSOR */
+        else if (strieq(c->argv[i]->ptr, "cursor")){
+            CHECKON(cursoron);
             if (i>=c->argc-1){
                 addReplyError(c, "need cursor");
-                return;
+                goto done;
             }
             if (getLongLongFromObjectOrReply(c, c->argv[i+1], &ctx.cursor, "need numeric cursor") != C_OK) return;
             if (ctx.cursor < 0){
                 addReplyError(c, "invalid cursor");
-                return;
+                goto done;
             }
             i+=2;
-        }
-    }
-
-
-
-    // parse the target.
-    if (strieq(c->argv[i]->ptr, "radius")){
-        if (i>=c->argc-3){
-            addReplyError(c, "need longitude, latitude, meters");
+        } 
+        /* GEOM */
+        else if (strieq(c->argv[i]->ptr, "radius")){
+            CHECKON(geomon);
+            if (i>=c->argc-3){
+                addReplyError(c, "need longitude, latitude, meters");
+                goto done;
+            }
+            if (getDoubleFromObjectOrReply(c, c->argv[i+1], &ctx.center.x, "need numeric longitude") != C_OK) return;
+            if (getDoubleFromObjectOrReply(c, c->argv[i+2], &ctx.center.y, "need numeric latitude") != C_OK) return;
+            if (getDoubleFromObjectOrReply(c, c->argv[i+3], &ctx.meters, "need numeric meters") != C_OK) return;
+            if (ctx.center.x < -180 || ctx.center.x > 180 || ctx.center.y < -90 || ctx.center.y > 90){
+                addReplyError(c, "invalid longitude/latitude pair");
+                goto done;
+            }
+            ctx.targetType = RADIUS;
+            ctx.bounds = geoutilBoundsFromLatLon(ctx.center.y, ctx.center.x, ctx.meters);
+            ctx.g = geomNewCirclePolygon(ctx.center, ctx.meters, 12);
+            i+=4;
+        } else if (strieq(c->argv[i]->ptr, "geom") || strieq(c->argv[i]->ptr, "geometry")){
+            CHECKON(geomon);
+            if (i==c->argc-1){
+                addReplyError(c, "need geometry");
+                goto done; 
+            }
+            geom g = NULL;
+            int sz = 0;
+            geomErr err = geomDecode(c->argv[i+1]->ptr, sdslen(c->argv[i+1]->ptr), 0, &g, &sz);
+            if (err!=GEOM_ERR_NONE){
+                addReplyError(c, "invalid geometry");
+                goto done;
+            }
+            ctx.g = g;
+            ctx.sz = sz;
+            ctx.targetType = GEOMETRY;
+            ctx.bounds = geomBounds(ctx.g);
+            i+=2;
+        } else if (strieq(c->argv[i]->ptr, "bounds")){
+            CHECKON(geomon);
+            if (i>=c->argc-4){
+                addReplyError(c, "need min longitude, min latitude, max longitude, max latitude");
+                goto done;
+            }
+            if (getDoubleFromObjectOrReply(c, c->argv[i+1], &ctx.bounds.min.x, "need numeric min longitude") != C_OK) return;
+            if (getDoubleFromObjectOrReply(c, c->argv[i+2], &ctx.bounds.min.y, "need numeric min latitude") != C_OK) return;
+            if (getDoubleFromObjectOrReply(c, c->argv[i+3], &ctx.bounds.max.x, "need numeric max longitude") != C_OK) return;
+            if (getDoubleFromObjectOrReply(c, c->argv[i+4], &ctx.bounds.max.y, "need numeric max latitude") != C_OK) return;
+            if (ctx.bounds.min.x < -180 || ctx.bounds.min.x > 180 || ctx.bounds.min.y < -90 || ctx.bounds.min.y > 90 ||
+                ctx.bounds.max.x < -180 || ctx.bounds.max.x > 180 || ctx.bounds.max.y < -90 || ctx.bounds.max.y > 90 ||
+                ctx.bounds.min.x > ctx.bounds.max.x || ctx.bounds.min.y > ctx.bounds.max.y){
+                addReplyError(c, "invalid longitude/latitude pairs");
+                goto done;
+            }
+            ctx.targetType = BOUNDS;
+            ctx.g = geomNewRectPolygon(ctx.bounds);
+            i+=5;
+        } else if (strieq(c->argv[i]->ptr, "tile")){
+            CHECKON(geomon);
+            if (i>=c->argc-3){
+                addReplyError(c, "need x,y,z");
+                goto done;
+            }
+            double x,y,z;
+            if (getDoubleFromObjectOrReply(c, c->argv[i+1], &x, "need numeric x") != C_OK) return;
+            if (getDoubleFromObjectOrReply(c, c->argv[i+2], &y, "need numeric y") != C_OK) return;
+            if (getDoubleFromObjectOrReply(c, c->argv[i+3], &z, "need numeric z") != C_OK) return;
+            bingTileXYToBounds(x,y,z, &ctx.bounds.min.y, &ctx.bounds.min.x, &ctx.bounds.max.y, &ctx.bounds.max.x);
+            ctx.targetType = BOUNDS;
+            ctx.g = geomNewRectPolygon(ctx.bounds);
+            i+=4;
+        } else if (strieq(c->argv[i]->ptr, "quad")){
+            CHECKON(geomon);
+            if (i>=c->argc-1){
+                addReplyError(c, "need key");
+                goto done;
+            }
+            if (!bingQuadKeyToBounds(c->argv[i+1]->ptr, &ctx.bounds.min.y, &ctx.bounds.min.x, &ctx.bounds.max.y, &ctx.bounds.max.x)){
+                addReplyError(c, "invalid quad key");
+                goto done;
+            }
+            ctx.targetType = BOUNDS;
+            ctx.g = geomNewRectPolygon(ctx.bounds);
+            i+=2;
+        } else if (strieq(c->argv[i]->ptr, "hash")){
+            CHECKON(geomon);
+            if (i>=c->argc-1){
+                addReplyError(c, "need hash");
+                goto done;
+            }
+            if (!hashBounds(c->argv[i+1]->ptr, 
+                    &ctx.bounds.min.y, &ctx.bounds.min.x, 
+                    &ctx.bounds.max.y, &ctx.bounds.max.x)
+            ){
+                addReplyError(c, "invalid hash");
+                goto done;   
+            }
+            ctx.targetType = BOUNDS;    
+            ctx.g = geomNewRectPolygon(ctx.bounds);
+            i+=2;
+        } else if (strieq(c->argv[i]->ptr, "member")){
+            CHECKON(geomon);
+            if (i>=c->argc-2){
+                addReplyError(c, "need member key, field");
+                goto done;
+            }
+            robj *o2 = lookupKeyRead(c->db, c->argv[i+1]);
+            if (o2 == NULL){
+                addReplyError(c, "member is not available in database");
+                goto done;
+            }
+            if (o2 != NULL && o2->type != OBJ_SPATIAL) {
+                addReplyError(c, "member key is holding the wrong kind of value");
+                goto done;
+            }
+            robj *h2 = spatialGetHash(o2);
+            sds value = hashTypeGetRaw(h2, c->argv[i+2]->ptr);
+            if (value==NULL){
+                addReplyError(c, "member is not available in database");
+                goto done;
+            }
+            releaseg=0;
+            ctx.g = (geom)value;
+            ctx.sz = sdslen(value);
+            ctx.targetType = GEOMETRY;
+            ctx.bounds = geomBounds(ctx.g);
+            i+=3;
+        } else {
+            addReplyError(c, "invalid arguments for 'gsearch' command");
             return;
         }
-        if (getDoubleFromObjectOrReply(c, c->argv[i+1], &ctx.center.x, "need numeric longitude") != C_OK) return;
-        if (getDoubleFromObjectOrReply(c, c->argv[i+2], &ctx.center.y, "need numeric latitude") != C_OK) return;
-        if (getDoubleFromObjectOrReply(c, c->argv[i+3], &ctx.meters, "need numeric meters") != C_OK) return;
-        if (ctx.center.x < -180 || ctx.center.x > 180 || ctx.center.y < -90 || ctx.center.y > 90){
-            addReplyError(c, "invalid longitude/latitude pair");
-            return;
-        }
-        ctx.targetType = RADIUS;
-        ctx.bounds = geoutilBoundsFromLatLon(ctx.center.y, ctx.center.x, ctx.meters);
-        ctx.g = geomNewCirclePolygon(ctx.center, ctx.meters, 12);
-        i+=4;
-    } else if (strieq(c->argv[i]->ptr, "geom") || strieq(c->argv[i]->ptr, "geometry")){
-        if (i==c->argc-1){
-            addReplyError(c, "need geometry");
-            return;    
-        }
-        geom g = NULL;
-        int sz = 0;
-        geomErr err = geomDecode(c->argv[i+1]->ptr, sdslen(c->argv[i+1]->ptr), 0, &g, &sz);
-        if (err!=GEOM_ERR_NONE){
-            addReplyError(c, "invalid geometry");
-            return;
-        }
-        ctx.g = g;
-        ctx.sz = sz;
-        ctx.targetType = GEOMETRY;
-        ctx.bounds = geomBounds(ctx.g);
-        i+=2;
-    } else if (strieq(c->argv[i]->ptr, "bounds")){
-        if (i>=c->argc-4){
-            addReplyError(c, "need min longitude, min latitude, max longitude, max latitude");
-            return;
-        }
-        if (getDoubleFromObjectOrReply(c, c->argv[i+1], &ctx.bounds.min.x, "need numeric min longitude") != C_OK) return;
-        if (getDoubleFromObjectOrReply(c, c->argv[i+2], &ctx.bounds.min.y, "need numeric min latitude") != C_OK) return;
-        if (getDoubleFromObjectOrReply(c, c->argv[i+3], &ctx.bounds.max.x, "need numeric max longitude") != C_OK) return;
-        if (getDoubleFromObjectOrReply(c, c->argv[i+4], &ctx.bounds.max.y, "need numeric max latitude") != C_OK) return;
-        if (ctx.bounds.min.x < -180 || ctx.bounds.min.x > 180 || ctx.bounds.min.y < -90 || ctx.bounds.min.y > 90 ||
-            ctx.bounds.max.x < -180 || ctx.bounds.max.x > 180 || ctx.bounds.max.y < -90 || ctx.bounds.max.y > 90 ||
-            ctx.bounds.min.x > ctx.bounds.max.x || ctx.bounds.min.y > ctx.bounds.max.y){
-            addReplyError(c, "invalid longitude/latitude pairs");
-            return;
-        }
-        ctx.targetType = BOUNDS;
-        ctx.g = geomNewRectPolygon(ctx.bounds);
-        i+=5;
-    } else if (strieq(c->argv[i]->ptr, "member")){
-        if (i>=c->argc-2){
-            addReplyError(c, "need member key, field");
-            return;
-        }
-        robj *o2 = lookupKeyRead(c->db, c->argv[i+1]);
-        if (o2 == NULL){
-            addReplyError(c, "member is not available in database");
-            return;
-        }
-        if (o2 != NULL && o2->type != OBJ_SPATIAL) {
-            addReplyError(c, "member key is holding the wrong kind of value");
-            return;
-        }
-        robj *h2 = spatialGetHash(o2);
-        sds value = hashTypeGetFromHashTable(h2, c->argv[i+2]->ptr);
-        if (value==NULL){
-            addReplyError(c, "member is not available in database");
-            return;   
-        }
-        releaseg=0;
-        ctx.g = (geom)value;
-        ctx.sz = sdslen(value);
-        ctx.targetType = GEOMETRY;
-        ctx.bounds = geomBounds(ctx.g);
-        i+=3;
-    } else {
-        addReplyError(c, "invalid arguments for 'gsearch' command");
-        return;
-    }
-
-    if (i < c->argc){
-        addReplyError(c, "wrong number of arguments for 'gsearch' command");
-        goto done;
     }
 
     if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.emptymultibulk)) == NULL || checkType(c,o,OBJ_SPATIAL)) {
@@ -1015,20 +1183,83 @@ void gsearchCommand(client *c){
         }
     }
 
+    char output[128];
+
     ctx.s = o->ptr;
-    rtreeSearch(ctx.s->tr, ctx.bounds.min.x, ctx.bounds.min.y, ctx.bounds.max.x, ctx.bounds.max.y, searchIterator, &ctx);
+    if (!cursoron||ctx.cursor==0){ // ATM only zero cursor is allowed
+       rtreeSearch(ctx.s->tr, ctx.bounds.min.x, ctx.bounds.min.y, ctx.bounds.max.x, ctx.bounds.max.y, searchIterator, &ctx);
+    }
     if (!ctx.fail){
-        addReplyMultiBulkLen(c, 2);
-        addReplyBulkLongLong(c, 0); // future cursor support
-        addReplyMultiBulkLen(c, ctx.len*2);
-        for (int i=0;i<ctx.len;i++){
-            addReplyBulkCBuffer(c, ctx.results[i].field, sdslen(ctx.results[i].field));
-            char *wkt = geomEncodeWKT((geom)ctx.results[i].value, 0);
-            if (!wkt){
-                addReplyBulkCBuffer(c, "", 0);
+        if (ctx.output == OUTPUT_COUNT) {
+            addReplyLongLong(c, ctx.len);
+        } else {
+            addReplyMultiBulkLen(c, 2);
+            addReplyBulkLongLong(c, 0); // future cursor support
+            if (ctx.output == OUTPUT_FIELD){
+                addReplyMultiBulkLen(c, ctx.len);
             } else {
-                addReplyBulkCBuffer(c, wkt, strlen(wkt));
-                geomFreeWKT(wkt);
+                addReplyMultiBulkLen(c, ctx.len*2);
+            }
+            for (int i=0;i<ctx.len;i++){
+                addReplyBulkCBuffer(c, ctx.results[i].field, ctx.results[i].fieldLen);
+                if (ctx.output != OUTPUT_FIELD){
+                    switch (ctx.output){
+                    default:
+                        addReplyBulkCBuffer(c, "", 0);
+                        break;
+                    case OUTPUT_WKT:{
+                        char *wkt = geomEncodeWKT((geom)ctx.results[i].value, 0);
+                        if (!wkt){
+                            addReplyBulkCBuffer(c, "", 0);
+                        } else {
+                            addReplyBulkCBuffer(c, wkt, strlen(wkt));
+                            geomFreeWKT(wkt);
+                        }
+                        break;
+                    }
+                    case OUTPUT_WKB:
+                        addReplyBulkCBuffer(c, ctx.results[i].value, ctx.results[i].valueLen);
+                        break;
+                    case OUTPUT_POINT:{
+                        geomCoord center = geomCenter((geom)ctx.results[i].value);
+                        addReplyMultiBulkLen(c, 2);
+                        addReplyDouble(c, center.x);
+                        addReplyDouble(c, center.y);
+                        break;
+                    }
+                    case OUTPUT_BOUNDS:{
+                        geomRect bounds = geomBounds((geom)ctx.results[i].value);
+                        addReplyMultiBulkLen(c, 4);
+                        addReplyDouble(c, bounds.min.x);
+                        addReplyDouble(c, bounds.min.y);
+                        addReplyDouble(c, bounds.max.x);
+                        addReplyDouble(c, bounds.max.y);
+                        break;
+                    }
+                    case OUTPUT_HASH:{
+                        geomCoord center = geomCenter((geom)ctx.results[i].value);
+                        hashEncode(center.x, center.y, ctx.precision, output);
+                        addReplyBulkCBuffer(c, output, strlen(output));
+                        break;
+                    }
+                    case OUTPUT_QUAD:{
+                        geomCoord center = geomCenter((geom)ctx.results[i].value);
+                        bingLatLongToQuadKey(center.y, center.x, ctx.precision, output);
+                        addReplyBulkCBuffer(c, output, strlen(output));
+                        break;
+                    }
+                    case OUTPUT_TILE:{
+                        geomCoord center = geomCenter((geom)ctx.results[i].value);
+                        int x, y;
+                        bingLatLonToTileXY(center.y, center.x, ctx.precision, &x, &y);
+                        addReplyMultiBulkLen(c, 2);
+                        addReplyDouble(c, x);
+                        addReplyDouble(c, y);
+                        break;
+                    }
+
+                    }
+                }
             }
         }
     }
@@ -1040,9 +1271,6 @@ done:
         geomFreePolyMap(ctx.m);
     }
     if (ctx.results){
-        for (int i=0;i<ctx.len;i++){
-            sdsfree(ctx.results[i].field);
-        }
         zfree(ctx.results);
     }
 }

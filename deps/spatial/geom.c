@@ -1406,7 +1406,7 @@ static int polygonIntersects(polyPolygon polygon, polyMultiPolygon holes, geomPo
             }
             break;
         case GEOM_POLYGON:
-            if (polyPolygonInside(polygon, m->polygons[i], m->holes[i])){
+            if (polyPolygonIntersects(polygon, m->polygons[i], m->holes[i])){
                 return 1;
             }
             break;

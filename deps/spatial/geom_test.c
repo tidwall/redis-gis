@@ -662,26 +662,34 @@ static geom decode(char *wkt){
     return g;
 }
 
-int test_GeomPolyMapIntersects(){
-    geom g1 = decode("POLYGON((1 1, 1 9, 9 9, 9 1, 1 1))");
-    geom g2 = decode("POLYGON((5 5, 5 6, 6 6, 6 5, 5 5))");
-    geom g3 = decode("POLYGON((15 5, 15 6, 16 6, 16 5, 15 5))");
-    assert(g1 && g2 && g3);
+static int testIntersects(char *input1, char *input2){
+    geom g1 = decode(input1);
+    geom g2 = decode(input2);
+    assert(g1 && g2);
     geomPolyMap *m1 = geomNewPolyMap(g1);
     geomPolyMap *m2 = geomNewPolyMap(g2);
-    geomPolyMap *m3 = geomNewPolyMap(g3);
-    assert(m1 && m2 && m3);
-
-    assert(geomPolyMapIntersects(m2, m1));
-    assert(!geomPolyMapIntersects(m3, m1));
-
-
+    assert(m1 && m2);
+    int res = geomPolyMapIntersects(m2, m1);
     geomFreePolyMap(m1);
     geomFreePolyMap(m2);
-    geomFreePolyMap(m3);
     geomFree(g1);
     geomFree(g2);
-    geomFree(g3);
+    return res;
+}
+
+int test_GeomPolyMapIntersects(){
+    assert(testIntersects(
+        "POLYGON((0 0, 0 16, 16 16, 16 0, 0 0))",
+        "POLYGON((15 15, 15 20, 20 20, 20 15, 15 15))"
+    ));
+    assert(testIntersects(
+        "POLYGON((0 0, 0 15, 15 15, 15 0, 0 0))",
+        "POLYGON((15 15, 15 20, 20 20, 20 15, 15 15))"
+    ));
+    assert(!testIntersects(
+        "POLYGON((0 0, 0 14, 14 14, 14 0, 0 0))",
+        "POLYGON((15 15, 15 20, 20 20, 20 15, 15 15))"
+    ));
     return 1;
 }
 

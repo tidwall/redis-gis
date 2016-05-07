@@ -118,7 +118,6 @@ test tests[] = {
 	{ "searchPolyMapIntersects", test_GeomPolyMapIntersects },
 	{ "searchPolyMapWithin", test_GeomPolyMapWithin },
 
-
 };
 
 static int abort_handled = 0;

@@ -161,7 +161,8 @@ spatial.o: spatial.c spatial.h server.h \
  ../deps/spatial/geoutil.h ../deps/spatial/grisu3.c ../deps/spatial/poly.c \
  ../deps/spatial/poly.h ../deps/spatial/polyinside.c \
  ../deps/spatial/polyintersects.c ../deps/spatial/polyraycast.c \
- ../deps/spatial/rtree.c ../deps/spatial/rtree.h ../deps/spatial/rtree_tmpl.c
+ ../deps/spatial/rtree.c ../deps/spatial/rtree.h ../deps/spatial/rtree_tmpl.c \
+ ../deps/spatial/hash.c ../deps/spatial/bing.c
 syncio.o: syncio.c server.h fmacros.h config.h solarisfixes.h \
  ../deps/lua/src/lua.h ../deps/lua/src/luaconf.h ae.h sds.h dict.h \
  adlist.h zmalloc.h anet.h ziplist.h intset.h version.h util.h latency.h \
