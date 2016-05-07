@@ -800,21 +800,35 @@ static int searchIterator(double minX, double minY, double maxX, double maxY, vo
     searchContext *ctx = userdata;
 
     // retreive the key
+
     uint64_t nidx = (uint64_t)item;
     sds sidx = sdsnewlen(&nidx, 8);
-    sds key = hashTypeGetFromHashTable(ctx->s->idxhash, sidx);
+    unsigned char *vstr = NULL;
+    unsigned int vlen = UINT_MAX;
+    long long vll = LLONG_MAX;
+    int res = hashTypeGetValue(ctx->s->idxhash, sidx, &vstr, &vlen, &vll);
     sdsfree(sidx);
+    if (res == C_ERR){
+        return 1;
+    }
+    sds field = sdsnewlen(vstr, vlen);
 
     // retreive the geom
-    sds value = hashTypeGetFromHashTable(ctx->s->h, key);
+    sds value = hashTypeGetRaw(ctx->s->h, field);
+    if (!value){
+        sdsfree(field);
+        return 1;
+    }
     geom g = (geom)value;
+
     int match = 0;
     if ((ctx->targetType == RADIUS) && (ctx->searchType==WITHIN || geomIsSimplePoint(g))){
         match = geomCoordWithinRadius(geomCenter(g), ctx->center, ctx->meters);
     } else {
         geomPolyMap *m = geomNewPolyMapSingleThreaded(g);
         if (!m){
-            return 0;
+            sdsfree(field);
+            return 1;
         }
         if (ctx->searchType==WITHIN){
             match = geomPolyMapWithin(m, ctx->m);
@@ -824,6 +838,7 @@ static int searchIterator(double minX, double minY, double maxX, double maxY, vo
         geomFreePolyMap(m);
     }
     if (!match){
+        sdsfree(field);
         return 1;
     }
     // append item
@@ -838,12 +853,13 @@ static int searchIterator(double minX, double minY, double maxX, double maxY, vo
         if (!nresults){
             addReplyError(ctx->c, "out of memory");
             ctx->fail = 1;
+            sdsfree(field);
             return 0;
         }
         ctx->results = nresults;
         ctx->cap = ncap;
     }
-    ctx->results[ctx->len].field = key;    // gets released on reply
+    ctx->results[ctx->len].field = field;    // gets released on reply
     ctx->results[ctx->len].value = value;  // gets released on reply
     ctx->len++;
     return 1;
@@ -1016,6 +1032,9 @@ done:
         geomFreePolyMap(ctx.m);
     }
     if (ctx.results){
+        for (int i=0;i<ctx.len;i++){
+            sdsfree(ctx.results[i].field);
+        }
         zfree(ctx.results);
     }
 }
