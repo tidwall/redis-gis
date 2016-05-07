@@ -315,6 +315,7 @@ static geomPolyMap *geomNewPolyMapBase(geom g, int singleThreaded){
 		}
 		m->multipoly = 1;
 		m->polygonCount = len;
+
 		m->polygons = polygons;
 		m->holes = holes;
 		m->types = types;

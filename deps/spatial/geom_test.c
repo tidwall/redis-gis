@@ -594,7 +594,7 @@ int test_GeomPolyMap(){
         assert(m);
 
         assert(m->geomCount==22);
-        assert(m->polygonCount==23);
+        assert(m->polygonCount==35);
 
         geomFreePolyMap(m);
         geomFree(g);
