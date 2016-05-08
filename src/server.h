@@ -615,6 +615,7 @@ typedef struct client {
     dict *pubsub_channels;  /* channels a client is interested in (SUBSCRIBE) */
     list *pubsub_patterns;  /* patterns a client is interested in (SUBSCRIBE) */
     sds peerid;             /* Cached peer ID. */
+	sds spatial_fence;      /* spatial fence channel key */                                       
 
     /* Response buffer */
     int bufpos;
@@ -989,6 +990,9 @@ struct redisServer {
     int watchdog_period;  /* Software watchdog period in ms. 0 = off */
     /* System hardware info */
     size_t system_memory_size;  /* Total memory in system as reported by OS */
+    /* Spatial */
+    dict *fences; /* A map of all of the fences */
+
 };
 
 typedef struct pubsubPattern {

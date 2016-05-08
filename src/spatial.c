@@ -28,7 +28,6 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 #include <ctype.h>
-#include "server.h"
 #include "spatial.h"
 #include "rtree.h"
 #include "geoutil.h"
@@ -41,6 +40,107 @@ int hashTypeGetValue(robj *o, sds field, unsigned char **vstr, unsigned int *vle
 int hashTypeSet(robj *o, sds field, sds value, int flags);
 sds hashTypeGetFromHashTable(robj *o, sds field);
 size_t hashTypeGetValueLength(robj *o, sds field);
+int pubsubSubscribeChannel(client *c, robj *channel);
+int pubsubUnsubscribePattern(client *c, robj *pattern, int notify);
+
+
+#define FENCE_ENTER    (1<<1)
+#define FENCE_EXIT     (1<<2)
+#define FENCE_CROSS    (1<<3)
+#define FENCE_INSIDE   (1<<4)
+#define FENCE_OUTSIDE  (1<<5)
+#define FENCE_KEYDEL   (1<<6)
+#define FENCE_FIELDDEL (1<<7)
+#define FENCE_FLUSH    (1<<8)
+#define FENCE_ALL      (FENCE_ENTER|FENCE_EXIT|FENCE_CROSS|\
+                       FENCE_INSIDE|FENCE_OUTSIDE|FENCE_KEYDEL|\
+                       FENCE_FIELDDEL|FENCE_FIELDDEL)
+
+#define FENCE_NOTIFY_SET 1
+#define FENCE_NOTIFY_DEL 2
+
+#define WITHIN     1
+#define INTERSECTS 2
+#define RADIUS     1
+#define GEOMETRY   2
+#define BOUNDS     3
+
+#define OUTPUT_COUNT    1
+#define OUTPUT_FIELD    2
+#define OUTPUT_WKT      3
+#define OUTPUT_WKB      4
+#define OUTPUT_JSON     5
+#define OUTPUT_POINT    6
+#define OUTPUT_BOUNDS   7
+#define OUTPUT_HASH     8
+#define OUTPUT_QUAD     9
+#define OUTPUT_TILE    10
+
+
+typedef struct resultItem {
+    char *field;
+    int fieldLen;
+    char *value;
+    int valueLen;
+
+} resultItem;
+
+typedef struct searchContext {
+    spatial *s;
+    client *c;
+    int searchType;
+    int targetType;
+    int fail;
+    int len;
+    int cap;
+    resultItem *results;
+    long long cursor;
+    sds pattern;
+    int allfields;
+    int output;
+    int precision;
+    int nofields;
+    int fence;
+    int releaseg;
+
+    // bounds
+    geomRect bounds;
+
+    // radius
+    geomCoord center;
+    double meters;
+
+    // geometry
+    geom g;
+    int sz;
+    geomPolyMap *m;
+
+} searchContext;
+
+
+typedef struct fence {
+    robj *channel;
+    int allfields;
+    sds pattern;
+    int targetType;
+    geomCoord center;
+    double meters;
+    int searchType;
+    geom g;
+    int sz;
+    geomPolyMap *m;
+} fence;
+
+void freeFence(fence *f){
+    if (!f){
+        return;
+    }
+    decrRefCount(f->channel);
+    if (f->pattern) sdsfree(f->pattern);
+    if (f->m) geomFreePolyMap(f->m);
+    if (f->g) geomFree(f->g);
+    zfree(f);
+}
 
 
 // get an sds based on the key. 
@@ -75,18 +175,22 @@ static void hashTypeIteratorValue(hashTypeIterator *hi, int what, unsigned char 
     }
 }
 
-int spatialTypeSet(robj *o, sds field, sds val);
-int spatialTypeDelete(robj *o, sds field, geomRect *rin);
+int spatialTypeSet(robj *o, sds field, sds val, int notify);
+int spatialTypeDelete(robj *o, sds field, geomRect *rin, int notify);
 unsigned long spatialTypeLength(robj *o);
 size_t spatialTypeGetValueLength(robj *o, sds field);
 int spatialTypeExists(robj *o, sds field);
 
 struct spatial {
-    robj *h;       // main hash store that persists to RDB.
-    rtree *tr;     // underlying spatial index.
+    robj *h;        // main hash store that persists to RDB.
+    rtree *tr;      // underlying spatial index.
+    fence **fences; // the stored fences
+    int fcap, flen; // the cap/len for fence array
+
+
     // The following fields are for mapping an idx to a key and 
     // vice versa. The rtree expects that each entry has a pointer to
-    // an objected in memory. This should be the base address of the 
+    // an object in memory. This should be the base address of the 
     // sds key that is stored in the main hash store, that way there is
     // no extra memory overhead except a pointer. But at the moment I'm 
     // 100% sure how safe it is to expect that a key in the hash will 
@@ -156,7 +260,7 @@ void *robjSpatialNewHash(void *o) {
             continue;
         }
         value = sdsnewlen(vstr, vlen);
-        spatialTypeSet(so, field, value);
+        spatialTypeSet(so, field, value, 0);
         sdsfree(value);
         sdsfree(field);
     }
@@ -178,11 +282,128 @@ void spatialFree(spatial *s){
         if (s->tr){
             rtreeFree(s->tr);   
         }
+        if (s->fences){
+            for (int i=0;i<s->flen;i++){
+                freeFence(s->fences[i]);
+            }
+            zfree(s->fences);
+        }
         zfree(s);
     }
 }
 
-int spatialTypeDelete(robj *o, sds field, geomRect *rin) {
+int matchSearch(
+    geom g, geomPolyMap *targetMap,
+    int targetType, int searchType, 
+    geomCoord center, double meters
+){
+    int match = 0;
+    if (geomIsSimplePoint(g) && targetType == RADIUS){
+        match = geomCoordWithinRadius(geomCenter(g), center, meters);
+    } else {
+        geomPolyMap *m = geomNewPolyMapSingleThreaded(g);
+        if (!m){
+            return 0;
+        }
+        if (searchType==WITHIN){
+            match = geomPolyMapWithin(m, targetMap);
+        } else {
+            match = geomPolyMapIntersects(m, targetMap);
+        }
+        geomFreePolyMap(m);
+    }
+    return match;
+}
+
+
+static robj *extractFenceKey(client *c){
+    if (!c->spatial_fence){
+        return NULL;
+    }
+    if (!strncmp(c->spatial_fence, "fence$", 6)){
+        char *p = c->spatial_fence+6;
+        while (*p){
+            if (*p=='$'){
+                return createStringObject(p+1, sdslen(c->spatial_fence)-(p-c->spatial_fence)-1);
+            }
+            p++;
+        }
+    }
+    return NULL;
+}
+
+void spatialReleaseAllFences(client *c){
+    if (!c->spatial_fence){
+        return;
+    }
+    robj *key = extractFenceKey(c);
+    if (key){
+        robj *o = lookupKeyRead(c->db, key);
+        if (o != NULL && o->type == OBJ_SPATIAL) {
+            spatial *s = o->ptr;
+            for (int i=0;i<s->flen;i++){
+                fence *f = s->fences[i];
+                if (!sdscmp(f->channel->ptr, c->spatial_fence)){
+                    freeFence(f);
+                    s->fences[i] = s->fences[s->flen-1];
+                    s->flen--;
+                    break;
+                }
+            }
+        }
+        decrRefCount(key);
+    }
+    robj *pchan = createStringObject(c->spatial_fence, sdslen(c->spatial_fence));
+    pubsubUnsubscribePattern(c,pchan,0);
+    decrRefCount(pchan);
+    sdsfree(c->spatial_fence);
+    c->spatial_fence = NULL;
+}
+
+
+static robj *newinoutmsg(char *prefix, sds field){
+    int l = strlen(prefix);
+    char *str = zmalloc(l+sdslen(field));
+    memcpy(str, prefix, l);
+    memcpy(str+l, field, sdslen(field));
+    return createStringObject(str, sdslen(field)+l);
+}
+
+void processFences(spatial *s, sds field, geom g, int fenceNotify){
+    robj *imsg = NULL;
+    robj *omsg = NULL;
+    if (fenceNotify == FENCE_NOTIFY_DEL){
+        for (int i=0;i<s->flen;i++){
+            fence *f = s->fences[i];
+            if (f->allfields || 
+                stringmatchlen(f->pattern,sdslen(f->pattern),(const char*)field,sdslen(field),0)
+            ) {
+                if (!imsg) imsg = newinoutmsg("outside:", field);
+                pubsubPublishMessage(f->channel, imsg);
+            }
+        }
+    } else {
+        for (int i=0;i<s->flen;i++){
+            fence *f = s->fences[i];
+            if (f->allfields || 
+                stringmatchlen(f->pattern,sdslen(f->pattern),(const char*)field,sdslen(field),0)
+            ) {
+                if (matchSearch(g, f->m, f->targetType, f->searchType, f->center, f->meters)){
+                    if (!imsg) imsg = newinoutmsg("inside:", field);
+                    pubsubPublishMessage(f->channel, imsg);
+                } else {
+                    if (!omsg) omsg = newinoutmsg("inside:", field);
+                    pubsubPublishMessage(f->channel, omsg);
+                }
+            }
+        }
+    }    
+    if (imsg) decrRefCount(imsg);
+    if (omsg) decrRefCount(omsg);
+}
+
+// notify is used to broadcast fence notifications
+int spatialTypeDelete(robj *o, sds field, geomRect *rin, int notify) {
     geomRect r;
     sds sidx;
     char *idx;
@@ -197,19 +418,26 @@ int spatialTypeDelete(robj *o, sds field, geomRect *rin) {
     idx = (char*)(*((uint64_t*)sidx));
     sdsfree(sidx);
 
+
+    geom g = NULL;
     if (rin) {
         r = *rin;
     } else {
         void *raw = hashTypeGetRaw(s->h, field);
         if (!raw) return 0;
-        r = geomBounds((geom)raw);
+        g = (geom)raw;
+        r = geomBounds(g);
     }
     res = hashTypeDelete(s->h, field);
     rtreeRemove(s->tr, r.min.x, r.min.y, r.max.x, r.max.y, idx);
+
+    if (notify){
+        processFences(s, field, g, FENCE_NOTIFY_DEL);
+    }
     return res;
 }
 
-int spatialTypeSet(robj *o, sds field, sds val){
+int spatialTypeSet(robj *o, sds field, sds val, int notify){
 
     int updated;
     geom g;
@@ -222,7 +450,7 @@ int spatialTypeSet(robj *o, sds field, sds val){
 
     g = (geom)val;
     r = geomBounds(g);
-    updated = spatialTypeDelete(o, field, &r);
+    updated = spatialTypeDelete(o, field, &r, 0);
 
     // create a new idx/field entry
     s->idx++;
@@ -237,6 +465,10 @@ int spatialTypeSet(robj *o, sds field, sds val){
 
     // update the rtree
     rtreeInsert(s->tr, r.min.x, r.min.y, r.max.x, r.max.y, s->idx);
+
+    if (notify){
+        processFences(s, field, g, FENCE_NOTIFY_SET);
+    }
 
     return updated;
 }
@@ -253,7 +485,6 @@ int spatialTypeExists(robj *o, sds field){
     return hashTypeExists(((spatial*)(o->ptr))->h, field);
 }
 
-
 robj *spatialTypeLookupWriteOrCreate(client *c, robj *key) {
     robj *o = lookupKeyWrite(c->db,key);
     if (o == NULL) {
@@ -268,13 +499,54 @@ robj *spatialTypeLookupWriteOrCreate(client *c, robj *key) {
     return o;
 }
 
+int subscribeSearchContextFence(client *c, sds key, searchContext *ctx){
+    char rchan[19];
+    strcpy(rchan, "fence$");
+    getRandomHexChars(rchan+6, 18-6);
+    sds keych = sdscatfmt(sdsnewlen(rchan, 18), "$%S", key);
+    robj *channel = createStringObject(keych, sdslen(keych));
+    sdsfree(keych);
+    
+    if (ctx->s->flen==ctx->s->fcap){
+        int ncap = ctx->s->fcap==0?1:ctx->s->fcap*2;
+        fence **nfences = zrealloc(ctx->s->fences, ncap*sizeof(fence*));
+        ctx->s->fences = nfences;
+        ctx->s->fcap = ncap;
+    }
+    // copy stuff from context.
+    fence *f = zmalloc(sizeof(fence));
+    memset(f, 0, sizeof(fence));
+    if (ctx->pattern){
+        f->pattern = sdsdup(ctx->pattern);
+    }
+    f->allfields = ctx->allfields;
+    f->channel = channel;
+    if (ctx->g){
+        f->g = zmalloc(ctx->sz);
+        memcpy(f->g, ctx->g, ctx->sz);
+        f->sz = ctx->sz;
+        f->m = geomNewPolyMap(f->g);
+        if (!f->m){
+            decrRefCount(f->channel);
+            zfree(f->g);
+            if (f->pattern) sdsfree(f->pattern);
+            zfree(f);
+            return 0;
+        }
+    }
+    ctx->s->fences[ctx->s->flen] = f;
+    ctx->s->flen++;
+    if (c->spatial_fence){
+        spatialReleaseAllFences(c);
+    }
+    c->spatial_fence = sdsdup(keych);
 
+    pubsubSubscribeChannel(c,f->channel);
+    
+    c->flags |= CLIENT_PUBSUB;
+    return 1;
+}
 
-//
-//
-//
-//
-//
 
 
 /* Importing some stuff from t_hash.c but these should exist in server.h */
@@ -562,7 +834,7 @@ void gsetCommand(client *c) {
     sds value;
     if ((o = spatialTypeLookupWriteOrCreate(c,c->argv[1])) == NULL) return;
     if ((value = decodeSdsOrReply(c,c->argv[3]->ptr)) == NULL) return;
-    update = spatialTypeSet(o,c->argv[2]->ptr,value);
+    update = spatialTypeSet(o,c->argv[2]->ptr,value, 1);
     sdsfree(value);
     addReply(c, update ? shared.czero : shared.cone);
     signalModifiedKey(c->db,c->argv[1]);
@@ -599,7 +871,7 @@ void gdelCommand(client *c) {
     if ((o = lookupKeyWriteOrReply(c,c->argv[1],shared.czero)) == NULL ||
         checkType(c,o,OBJ_SPATIAL)) return;
     for (j = 2; j < c->argc; j++) {
-        if (spatialTypeDelete(o, c->argv[j]->ptr, NULL)) {
+        if (spatialTypeDelete(o, c->argv[j]->ptr, NULL, 1)) {
             deleted++;
             if (spatialTypeLength(o) == 0) {
                 dbDelete(c->db,c->argv[1]);
@@ -650,7 +922,7 @@ void gsetnxCommand(client *c) {
         }
         sds value = sdsnewlen(g, sz);
         geomFree(g);
-        spatialTypeSet(o,c->argv[2]->ptr,value);
+        spatialTypeSet(o,c->argv[2]->ptr,value,1);
         sdsfree(value);
         addReply(c, shared.cone);
         signalModifiedKey(c->db,c->argv[1]);
@@ -677,7 +949,7 @@ void gmsetCommand(client *c) {
         }
         sds value = sdsnewlen(g, sz);
         geomFree(g);
-        spatialTypeSet(o,c->argv[i+0]->ptr,value);
+        spatialTypeSet(o,c->argv[i+0]->ptr,value,1);
         sdsfree(value);
     }
     addReply(c, shared.ok);
@@ -760,75 +1032,9 @@ static int strieq(const char *str1, const char *str2){
     return 1;
 }
 
-#define WITHIN     1
-#define INTERSECTS 2
-#define RADIUS     1
-#define GEOMETRY   2
-#define BOUNDS     3
-
-#define OUTPUT_COUNT    1
-#define OUTPUT_FIELD    2
-#define OUTPUT_WKT      3
-#define OUTPUT_WKB      4
-#define OUTPUT_JSON     5
-#define OUTPUT_POINT    6
-#define OUTPUT_BOUNDS   7
-#define OUTPUT_HASH     8
-#define OUTPUT_QUAD     9
-#define OUTPUT_TILE    10
-
-#define FENCE_ENTER    (1<<1)
-#define FENCE_EXIT     (1<<2)
-#define FENCE_CROSS    (1<<3)
-#define FENCE_INSIDE   (1<<4)
-#define FENCE_OUTSIDE  (1<<5)
-#define FENCE_KEYDEL   (1<<6)
-#define FENCE_FIELDDEL (1<<7)
-#define FENCE_FLUSH    (1<<8)
-#define FENCE_ALL      (FENCE_ENTER|FENCE_EXIT|FENCE_CROSS|\
-                       FENCE_INSIDE|FENCE_OUTSIDE|FENCE_KEYDEL|\
-                       FENCE_FIELDDEL|FENCE_FIELDDEL)
 
 
 
-typedef struct resultItem {
-    char *field;
-    int fieldLen;
-    char *value;
-    int valueLen;
-
-} resultItem;
-
-typedef struct searchContext {
-    spatial *s;
-    client *c;
-    int searchType;
-    int targetType;
-    int fail;
-    int len;
-    int cap;
-    resultItem *results;
-    long long cursor;
-    sds pattern;
-    int allfields;
-    int output;
-    int precision;
-    int nofields;
-    int fence;
-
-    // bounds
-    geomRect bounds;
-
-    // radius
-    geomCoord center;
-    double meters;
-
-    // geometry
-    geom g;
-    int sz;
-    geomPolyMap *m;
-
-} searchContext;
 
 static int searchIterator(double minX, double minY, double maxX, double maxY, void *item, void *userdata){
     (void)(minX);(void)(minY);(void)(maxX);(void)(maxY); // unused vars.
@@ -866,21 +1072,7 @@ static int searchIterator(double minX, double minY, double maxX, double maxY, vo
 
     geom g = (geom)value;
 
-    int match = 0;
-    if (geomIsSimplePoint(g) && ctx->targetType == RADIUS){
-        match = geomCoordWithinRadius(geomCenter(g), ctx->center, ctx->meters);
-    } else {
-        geomPolyMap *m = geomNewPolyMapSingleThreaded(g);
-        if (!m){
-            return 1;
-        }
-        if (ctx->searchType==WITHIN){
-            match = geomPolyMapWithin(m, ctx->m);
-        } else {
-            match = geomPolyMapIntersects(m, ctx->m);
-        }
-        geomFreePolyMap(m);
-    }
+    int match = matchSearch(g, ctx->m, ctx->targetType, ctx->searchType, ctx->center, ctx->meters);
     if (!match){
         return 1;
     }
@@ -924,7 +1116,7 @@ static void addInvalidSearchReplyError(client *c){
 //   [WITHIN|INTERSECTS] 
 //   [CURSOR cursor]
 //   [MATCH pattern]
-//   [FENCE ENTER|EXIT|INSIDE|OUTSIDE|ALL]
+//   [FENCE]
 //   [OUTPUT COUNT|FIELD|WKT|WKB|JSON|POINT|BOUNDS|(HASH precision)|(QUAD level)|(TILE z)]
 //   (MEMBER key field)|
 //      (BOUNDS minlon minlat maxlon maxlat)|
@@ -934,11 +1126,11 @@ static void addInvalidSearchReplyError(client *c){
 //      (HASH geohash)
 //      (RADIUS lon lat meters)
 void gsearchCommand(client *c){
-    int releaseg = 1;
     robj *o;
     searchContext ctx;
     memset(&ctx, 0, sizeof(searchContext));
     ctx.c = c;
+    ctx.releaseg = 1;
     ctx.searchType = INTERSECTS;
     ctx.cursor = -1;
     ctx.allfields = 1;
@@ -977,16 +1169,16 @@ void gsearchCommand(client *c){
         /* FENCE */
         else if (strieq(c->argv[i]->ptr, "fence")){
             CHECKON(fenceon);
-            if (i>=c->argc-1){
-                addReplyError(c, "need fence type");
-                goto done;
-            }
-            if (!strieq(c->argv[i+1]->ptr, "all")){
-                addReplyError(c, "fence type must be 'all'");
-                goto done;
-            }
+            // if (i>=c->argc-1){
+            //     addReplyError(c, "need fence type");
+            //     goto done;
+            // }
+            // if (!strieq(c->argv[i+1]->ptr, "all")){
+            //     addReplyError(c, "fence type must be 'all'");
+            //     goto done;
+            // }
             ctx.fence = FENCE_ALL;
-            i+=2;
+            i+=1;
         }
         /* OUTPUT */
         else if (strieq(c->argv[i]->ptr, "output")){
@@ -1087,7 +1279,7 @@ void gsearchCommand(client *c){
             }
             ctx.targetType = RADIUS;
             ctx.bounds = geoutilBoundsFromLatLon(ctx.center.y, ctx.center.x, ctx.meters);
-            ctx.g = geomNewCirclePolygon(ctx.center, ctx.meters, 12);
+            ctx.g = geomNewCirclePolygon(ctx.center, ctx.meters, 12, &ctx.sz);
             i+=4;
         } else if (strieq(c->argv[i]->ptr, "geom") || strieq(c->argv[i]->ptr, "geometry")){
             CHECKON(geomon);
@@ -1124,7 +1316,7 @@ void gsearchCommand(client *c){
                 goto done;
             }
             ctx.targetType = BOUNDS;
-            ctx.g = geomNewRectPolygon(ctx.bounds);
+            ctx.g = geomNewRectPolygon(ctx.bounds, &ctx.sz);
             i+=5;
         } else if (strieq(c->argv[i]->ptr, "tile")){
             CHECKON(geomon);
@@ -1138,7 +1330,7 @@ void gsearchCommand(client *c){
             if (getDoubleFromObjectOrReply(c, c->argv[i+3], &z, "need numeric z") != C_OK) return;
             bingTileXYToBounds(x,y,z, &ctx.bounds.min.y, &ctx.bounds.min.x, &ctx.bounds.max.y, &ctx.bounds.max.x);
             ctx.targetType = BOUNDS;
-            ctx.g = geomNewRectPolygon(ctx.bounds);
+            ctx.g = geomNewRectPolygon(ctx.bounds, &ctx.sz);
             i+=4;
         } else if (strieq(c->argv[i]->ptr, "quad")){
             CHECKON(geomon);
@@ -1151,7 +1343,7 @@ void gsearchCommand(client *c){
                 goto done;
             }
             ctx.targetType = BOUNDS;
-            ctx.g = geomNewRectPolygon(ctx.bounds);
+            ctx.g = geomNewRectPolygon(ctx.bounds, &ctx.sz);
             i+=2;
         } else if (strieq(c->argv[i]->ptr, "hash")){
             CHECKON(geomon);
@@ -1167,7 +1359,7 @@ void gsearchCommand(client *c){
                 goto done;   
             }
             ctx.targetType = BOUNDS;    
-            ctx.g = geomNewRectPolygon(ctx.bounds);
+            ctx.g = geomNewRectPolygon(ctx.bounds, &ctx.sz);
             i+=2;
         } else if (strieq(c->argv[i]->ptr, "member")){
             CHECKON(geomon);
@@ -1190,7 +1382,7 @@ void gsearchCommand(client *c){
                 addReplyError(c, "member is not available in database");
                 goto done;
             }
-            releaseg=0;
+            ctx.releaseg=0;
             ctx.g = (geom)value;
             ctx.sz = sdslen(value);
             ctx.targetType = GEOMETRY;
@@ -1206,110 +1398,112 @@ void gsearchCommand(client *c){
         goto done;
     }
 
-    if (ctx.g){
+    if (ctx.g&&!ctx.fence){
         ctx.m = geomNewPolyMap(ctx.g);
         if (!ctx.m){
             addReplyError(c, "poly map failure");
             goto done;
         }
     }
+    ctx.s = o->ptr;
     if (ctx.fence){
-        printf("123\n");
-        c->flags |= CLIENT_PUBSUB;
-    } else {
-        char output[128];
-
-        ctx.s = o->ptr;
-        if (!cursoron||ctx.cursor==0){ // ATM only zero cursor is allowed
-           rtreeSearch(ctx.s->tr, ctx.bounds.min.x, ctx.bounds.min.y, ctx.bounds.max.x, ctx.bounds.max.y, searchIterator, &ctx);
+        if (!subscribeSearchContextFence(c, c->argv[1]->ptr, &ctx)){
+            addReplyError(c, "fence failure");
+            goto done;    
         }
-        if (!ctx.fail){
-            if (ctx.output == OUTPUT_COUNT) {
-                addReplyLongLong(c, ctx.len);
-            } else {
-                addReplyMultiBulkLen(c, 2);
-                addReplyBulkLongLong(c, 0); // future cursor support
-                if (ctx.output == OUTPUT_FIELD){
-                    addReplyMultiBulkLen(c, ctx.len);
-                } else {
-                    addReplyMultiBulkLen(c, ctx.len*2);
-                }
-                for (int i=0;i<ctx.len;i++){
-                    addReplyBulkCBuffer(c, ctx.results[i].field, ctx.results[i].fieldLen);
-                    if (ctx.output != OUTPUT_FIELD){
-                        switch (ctx.output){
-                        default:
-                            addReplyBulkCBuffer(c, "", 0);
-                            break;
-                        case OUTPUT_WKT:{
-                            char *wkt = geomEncodeWKT((geom)ctx.results[i].value, 0);
-                            if (!wkt){
-                                addReplyBulkCBuffer(c, "", 0);
-                            } else {
-                                addReplyBulkCBuffer(c, wkt, strlen(wkt));
-                                geomFreeWKT(wkt);
-                            }
-                            break;
-                        }
-                        case OUTPUT_JSON:{
-                            char *json = geomEncodeJSON((geom)ctx.results[i].value);
-                            if (!json){
-                                addReplyBulkCBuffer(c, "", 0);
-                            } else {
-                                addReplyBulkCBuffer(c, json, strlen(json));
-                                geomFreeJSON(json);
-                            }
-                            break;
-                        }
-                        case OUTPUT_WKB:
-                            addReplyBulkCBuffer(c, ctx.results[i].value, ctx.results[i].valueLen);
-                            break;
-                        case OUTPUT_POINT:{
-                            geomCoord center = geomCenter((geom)ctx.results[i].value);
-                            addReplyMultiBulkLen(c, 2);
-                            addReplyDouble(c, center.x);
-                            addReplyDouble(c, center.y);
-                            break;
-                        }
-                        case OUTPUT_BOUNDS:{
-                            geomRect bounds = geomBounds((geom)ctx.results[i].value);
-                            addReplyMultiBulkLen(c, 4);
-                            addReplyDouble(c, bounds.min.x);
-                            addReplyDouble(c, bounds.min.y);
-                            addReplyDouble(c, bounds.max.x);
-                            addReplyDouble(c, bounds.max.y);
-                            break;
-                        }
-                        case OUTPUT_HASH:{
-                            geomCoord center = geomCenter((geom)ctx.results[i].value);
-                            hashEncode(center.x, center.y, ctx.precision, output);
-                            addReplyBulkCBuffer(c, output, strlen(output));
-                            break;
-                        }
-                        case OUTPUT_QUAD:{
-                            geomCoord center = geomCenter((geom)ctx.results[i].value);
-                            bingLatLongToQuadKey(center.y, center.x, ctx.precision, output);
-                            addReplyBulkCBuffer(c, output, strlen(output));
-                            break;
-                        }
-                        case OUTPUT_TILE:{
-                            geomCoord center = geomCenter((geom)ctx.results[i].value);
-                            int x, y;
-                            bingLatLonToTileXY(center.y, center.x, ctx.precision, &x, &y);
-                            addReplyMultiBulkLen(c, 2);
-                            addReplyDouble(c, x);
-                            addReplyDouble(c, y);
-                            break;
-                        }
+        goto done;
+    }
 
+    char output[128];
+    if (!cursoron||ctx.cursor==0){ // ATM only zero cursor is allowed
+       rtreeSearch(ctx.s->tr, ctx.bounds.min.x, ctx.bounds.min.y, ctx.bounds.max.x, ctx.bounds.max.y, searchIterator, &ctx);
+    }
+    if (!ctx.fail){
+        if (ctx.output == OUTPUT_COUNT) {
+            addReplyLongLong(c, ctx.len);
+        } else {
+            addReplyMultiBulkLen(c, 2);
+            addReplyBulkLongLong(c, 0); // future cursor support
+            if (ctx.output == OUTPUT_FIELD){
+                addReplyMultiBulkLen(c, ctx.len);
+            } else {
+                addReplyMultiBulkLen(c, ctx.len*2);
+            }
+            for (int i=0;i<ctx.len;i++){
+                addReplyBulkCBuffer(c, ctx.results[i].field, ctx.results[i].fieldLen);
+                if (ctx.output != OUTPUT_FIELD){
+                    switch (ctx.output){
+                    default:
+                        addReplyBulkCBuffer(c, "", 0);
+                        break;
+                    case OUTPUT_WKT:{
+                        char *wkt = geomEncodeWKT((geom)ctx.results[i].value, 0);
+                        if (!wkt){
+                            addReplyBulkCBuffer(c, "", 0);
+                        } else {
+                            addReplyBulkCBuffer(c, wkt, strlen(wkt));
+                            geomFreeWKT(wkt);
                         }
+                        break;
+                    }
+                    case OUTPUT_JSON:{
+                        char *json = geomEncodeJSON((geom)ctx.results[i].value);
+                        if (!json){
+                            addReplyBulkCBuffer(c, "", 0);
+                        } else {
+                            addReplyBulkCBuffer(c, json, strlen(json));
+                            geomFreeJSON(json);
+                        }
+                        break;
+                    }
+                    case OUTPUT_WKB:
+                        addReplyBulkCBuffer(c, ctx.results[i].value, ctx.results[i].valueLen);
+                        break;
+                    case OUTPUT_POINT:{
+                        geomCoord center = geomCenter((geom)ctx.results[i].value);
+                        addReplyMultiBulkLen(c, 2);
+                        addReplyDouble(c, center.x);
+                        addReplyDouble(c, center.y);
+                        break;
+                    }
+                    case OUTPUT_BOUNDS:{
+                        geomRect bounds = geomBounds((geom)ctx.results[i].value);
+                        addReplyMultiBulkLen(c, 4);
+                        addReplyDouble(c, bounds.min.x);
+                        addReplyDouble(c, bounds.min.y);
+                        addReplyDouble(c, bounds.max.x);
+                        addReplyDouble(c, bounds.max.y);
+                        break;
+                    }
+                    case OUTPUT_HASH:{
+                        geomCoord center = geomCenter((geom)ctx.results[i].value);
+                        hashEncode(center.x, center.y, ctx.precision, output);
+                        addReplyBulkCBuffer(c, output, strlen(output));
+                        break;
+                    }
+                    case OUTPUT_QUAD:{
+                        geomCoord center = geomCenter((geom)ctx.results[i].value);
+                        bingLatLongToQuadKey(center.y, center.x, ctx.precision, output);
+                        addReplyBulkCBuffer(c, output, strlen(output));
+                        break;
+                    }
+                    case OUTPUT_TILE:{
+                        geomCoord center = geomCenter((geom)ctx.results[i].value);
+                        int x, y;
+                        bingLatLonToTileXY(center.y, center.x, ctx.precision, &x, &y);
+                        addReplyMultiBulkLen(c, 2);
+                        addReplyDouble(c, x);
+                        addReplyDouble(c, y);
+                        break;
+                    }
+
                     }
                 }
             }
         }
     }
 done:
-    if (ctx.g&&releaseg){
+    if (ctx.g&&ctx.releaseg){
         geomFree(ctx.g);
     }
     if (ctx.m){
@@ -1319,3 +1513,6 @@ done:
         zfree(ctx.results);
     }
 }
+
+
+

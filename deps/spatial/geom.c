@@ -928,7 +928,6 @@ static char *geomEncodeJSONInner(geom g, int *read){
     int isZ = geomIsZ(gb);
     int isM = geomIsM(gb);
     int len = 0;
-    int showZM = (isM||isZ);
     char *json = NULL;
 
     int coordSize = 16;
@@ -1313,7 +1312,7 @@ geomErr geomDecode(const void *input, size_t length, geomWKTDecodeOpts opts, geo
 }
 
 // CirclePolygon returns a Polygon around the radius.
-geom geomNewCirclePolygon(geomCoord center, double meters, int steps){
+geom geomNewCirclePolygon(geomCoord center, double meters, int steps, int *size){
     if (steps < 3) {
         steps = 3;
     }
@@ -1342,10 +1341,11 @@ geom geomNewCirclePolygon(geomCoord center, double meters, int steps){
     *((double*)(b+13+(i*16)+0)) = *((double*)(b+13+(0*16)+0));
     *((double*)(b+13+(i*16)+8)) = *((double*)(b+13+(0*16)+8));
     i++;
+    if (size) *size = sz;
     return (geom)b;
 }
 
-geom geomNewRectPolygon(geomRect rect){
+geom geomNewRectPolygon(geomRect rect, int *size){
     int sz = (5*16)+13; // exact byte count
     uint8_t *b = zmalloc(sz);
     if (!b){
@@ -1370,6 +1370,7 @@ geom geomNewRectPolygon(geomRect rect){
     values[7] = rect.min.y;
     values[8] = rect.min.x;
     values[9] = rect.max.y;
+    if (size) *size = sz;
     return (geom)b;
 }
 

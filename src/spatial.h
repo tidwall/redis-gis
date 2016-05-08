@@ -4,6 +4,7 @@
 #include "server.h"
 
 typedef struct spatial spatial;
+//typedef struct client client;
 
 spatial *spatialNew();
 void spatialFree(spatial *s);

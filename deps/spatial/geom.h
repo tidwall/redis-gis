@@ -112,8 +112,8 @@ int geomIteratorValues(geomIterator *itr, geom *g, int *sz);
 
 geom *geomGeometryCollectionFlattenedArray(geom g, int *count);
 void geomFreeFlattenedArray(geom *garr);
-geom geomNewCirclePolygon(geomCoord center, double meters, int steps);
-geom geomNewRectPolygon(geomRect rect);
+geom geomNewCirclePolygon(geomCoord center, double meters, int steps, int *size);
+geom geomNewRectPolygon(geomRect rect, int *size);
 int geomIsSimplePoint(geom g);
 int geomCoordWithinRadius(geomCoord c, geomCoord center, double meters);
 
