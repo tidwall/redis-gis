@@ -1938,6 +1938,7 @@ void initServer(void) {
     server.pubsub_patterns = listCreate();
     listSetFreeMethod(server.pubsub_patterns,freePubsubPattern);
     listSetMatchMethod(server.pubsub_patterns,listMatchPubsubPattern);
+    server.fences = dictCreate(&dbDictType,NULL);
     server.cronloops = 0;
     server.rdb_child_pid = -1;
     server.aof_child_pid = -1;
@@ -3115,6 +3116,7 @@ sds genRedisInfoString(char *section) {
             "keyspace_misses:%lld\r\n"
             "pubsub_channels:%ld\r\n"
             "pubsub_patterns:%lu\r\n"
+            "fences:%ld\r\n"
             "latest_fork_usec:%lld\r\n"
             "migrate_cached_sockets:%ld\r\n",
             server.stat_numconnections,
@@ -3134,6 +3136,7 @@ sds genRedisInfoString(char *section) {
             server.stat_keyspace_misses,
             dictSize(server.pubsub_channels),
             listLength(server.pubsub_patterns),
+            dictSize(server.fences),
             server.stat_fork_time,
             dictSize(server.migrate_cached_sockets));
     }

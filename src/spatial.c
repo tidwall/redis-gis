@@ -283,13 +283,23 @@ void spatialFree(spatial *s){
             rtreeFree(s->tr);   
         }
         if (s->fences){
-            for (int i=0;i<s->flen;i++){
-                freeFence(s->fences[i]);
-            }
+            // do not free the fence object, only the array.
             zfree(s->fences);
         }
         zfree(s);
     }
+}
+
+
+void pushFence(spatial *s, fence *f){
+    if (s->flen==s->fcap){
+        int ncap = s->fcap==0?1:s->fcap*2;
+        fence **nfences = zrealloc(s->fences, ncap*sizeof(fence*));
+        s->fences = nfences;
+        s->fcap = ncap;
+    }
+    s->fences[s->flen] = f;
+    s->flen++;
 }
 
 int matchSearch(
@@ -332,19 +342,72 @@ static robj *extractFenceKey(client *c){
     return NULL;
 }
 
+static int fenceChannelMatchesKey(sds channel, sds key){
+    if (!strncmp(channel, "fence$", 6)){
+        char *p = channel+6;
+        while (*p){
+            if (*p=='$'){
+                p++;
+                int i = p-channel;
+                if (sdslen(channel)-i == sdslen(key)){
+                    int l = sdslen(key);
+                    for (int j=0;j<l;j++,i++){
+                        if (channel[i]!=key[j]){
+                            return 0;
+                        }
+                    }
+                    return 1;
+                }
+                break;
+            }
+            p++;
+        }
+    }
+    return 0;
+}
+
+void attachFences(spatial *s, sds key){
+    dictIterator *di = dictGetIterator(server.fences);
+    dictEntry *de;
+
+    while((de = dictNext(di)) != NULL) {
+        sds channel = dictGetKey(de);
+        if (fenceChannelMatchesKey(channel, key)){
+            robj *sidx = dictGetVal(de);
+            uint64_t nidx = *((uint64_t*)(sidx->ptr));
+            fence *f = (fence*)nidx;
+            pushFence(s, f);
+        }
+    }
+}
+
+/* spatialReleaseAllFences is called from networking.c when the client disconnects */
 void spatialReleaseAllFences(client *c){
     if (!c->spatial_fence){
         return;
     }
+
+    fence *f = NULL;
+
+    // remove it from the server dict
+    dictEntry *de = dictFind(server.fences,c->spatial_fence);
+    if (de){
+        robj *sidx = dictGetVal(de);
+        uint64_t nidx = *((uint64_t*)(sidx->ptr));
+        f = (fence*)nidx;
+        dictDeleteNoFree(server.fences,c->spatial_fence);
+        decrRefCount(sidx);
+    }
+
+    // remove it from the spatial index
     robj *key = extractFenceKey(c);
     if (key){
         robj *o = lookupKeyRead(c->db, key);
         if (o != NULL && o->type == OBJ_SPATIAL) {
             spatial *s = o->ptr;
             for (int i=0;i<s->flen;i++){
-                fence *f = s->fences[i];
-                if (!sdscmp(f->channel->ptr, c->spatial_fence)){
-                    freeFence(f);
+                fence *nf = s->fences[i];
+                if (!sdscmp(nf->channel->ptr, c->spatial_fence)){
                     s->fences[i] = s->fences[s->flen-1];
                     s->flen--;
                     break;
@@ -353,11 +416,19 @@ void spatialReleaseAllFences(client *c){
         }
         decrRefCount(key);
     }
+
+    // free the fence
+    if (f){
+        freeFence(f);
+    }
+
+    // finally unsubscribe from the channel
     robj *pchan = createStringObject(c->spatial_fence, sdslen(c->spatial_fence));
     pubsubUnsubscribePattern(c,pchan,0);
     decrRefCount(pchan);
     sdsfree(c->spatial_fence);
     c->spatial_fence = NULL;
+
 }
 
 
@@ -490,6 +561,7 @@ robj *spatialTypeLookupWriteOrCreate(client *c, robj *key) {
     if (o == NULL) {
         o = createSpatialObject();
         dbAdd(c->db,key,o);
+        attachFences(o->ptr, key->ptr);
     } else {
         if (o->type != OBJ_SPATIAL) {
             addReply(c,shared.wrongtypeerr);
@@ -498,7 +570,6 @@ robj *spatialTypeLookupWriteOrCreate(client *c, robj *key) {
     }
     return o;
 }
-
 int subscribeSearchContextFence(client *c, sds key, searchContext *ctx){
     char rchan[19];
     strcpy(rchan, "fence$");
@@ -507,12 +578,7 @@ int subscribeSearchContextFence(client *c, sds key, searchContext *ctx){
     robj *channel = createStringObject(keych, sdslen(keych));
     sdsfree(keych);
     
-    if (ctx->s->flen==ctx->s->fcap){
-        int ncap = ctx->s->fcap==0?1:ctx->s->fcap*2;
-        fence **nfences = zrealloc(ctx->s->fences, ncap*sizeof(fence*));
-        ctx->s->fences = nfences;
-        ctx->s->fcap = ncap;
-    }
+    
     // copy stuff from context.
     fence *f = zmalloc(sizeof(fence));
     memset(f, 0, sizeof(fence));
@@ -534,12 +600,19 @@ int subscribeSearchContextFence(client *c, sds key, searchContext *ctx){
             return 0;
         }
     }
-    ctx->s->fences[ctx->s->flen] = f;
-    ctx->s->flen++;
+
+    if (ctx->s){
+       pushFence(ctx->s, f);
+    }
+    
     if (c->spatial_fence){
         spatialReleaseAllFences(c);
     }
     c->spatial_fence = sdsdup(keych);
+
+    uint64_t nidx = (uint64_t)f;
+    robj *sidx = createRawStringObject((char*)&nidx, 8);
+    dictAdd(server.fences,f->channel->ptr,sidx);
 
     pubsubSubscribeChannel(c,f->channel);
     
@@ -1394,10 +1467,19 @@ void gsearchCommand(client *c){
         }
     }
 
-    if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.emptymultibulk)) == NULL || checkType(c,o,OBJ_SPATIAL)) {
-        goto done;
+    if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.emptymultibulk)) == NULL) {
+        if (!ctx.fence){
+           goto done;
+        }
+    } else if (o->type != OBJ_SPATIAL) {
+        if (!ctx.fence){
+            addReply(c,shared.wrongtypeerr);
+            goto done;
+        }
+    } else {
+        ctx.s = o->ptr;
     }
-
+    
     if (ctx.g&&!ctx.fence){
         ctx.m = geomNewPolyMap(ctx.g);
         if (!ctx.m){
@@ -1405,7 +1487,6 @@ void gsearchCommand(client *c){
             goto done;
         }
     }
-    ctx.s = o->ptr;
     if (ctx.fence){
         if (!subscribeSearchContextFence(c, c->argv[1]->ptr, &ctx)){
             addReplyError(c, "fence failure");
@@ -1413,6 +1494,8 @@ void gsearchCommand(client *c){
         }
         goto done;
     }
+
+    
 
     char output[128];
     if (!cursoron||ctx.cursor==0){ // ATM only zero cursor is allowed
