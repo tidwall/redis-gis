@@ -808,6 +808,13 @@ static int cliSendCommand(int argc, char **argv, int repeat) {
         !strcasecmp(command,"psubscribe")) config.pubsub_mode = 1;
     if (!strcasecmp(command,"sync") ||
         !strcasecmp(command,"psync")) config.slave_mode = 1;
+    if (!strcasecmp(command,"gsearch")){
+        for (int i=0;i<argc;i++){
+            if (!strcasecmp(argv[i],"fence")){
+                config.pubsub_mode = 1;
+            }
+        }
+    }
 
     /* When the user manually calls SCRIPT DEBUG, setup the activation of
      * debugging mode on the next eval if needed. */
