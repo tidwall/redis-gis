@@ -1,6 +1,6 @@
 STD= 
-WARN= -Wall
-OPT= -O2
+WARN= -Wall -Wno-strict-aliasing
+OPT= -O2 -std=c99
 
 R_CFLAGS= $(STD) $(WARN) $(OPT) $(DEBUG) $(CFLAGS)
 R_LDFLAGS= $(LDFLAGS)

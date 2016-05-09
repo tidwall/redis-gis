@@ -37,6 +37,15 @@
 #include "geoutil.h"
 #include "poly.h"
 #include "json.h"
+
+#ifndef LITTLE_ENDIAN
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+#define LITTLE_ENDIAN 1
+#else
+#define LITTLE_ENDIAN 0
+#endif
+#endif
+
 static geomErr geomDecodeWKTInner(const char *input, geomWKTDecodeOpts opts, geom *g, int *size, int *read);
 
 typedef struct ctx{

@@ -48,6 +48,7 @@ static geomCoord level1_getCenter(ghdr *h, uint8_t *g, int *read){
 
 static geomRect level2_getBounds(ghdr *h, uint8_t *g, int *read){
 	geomRect r;
+	memset(&r, 0, sizeof(geomRect));
 	int got = 0;
 	uint8_t *p = g;
 	int len = *((uint32_t*)p);

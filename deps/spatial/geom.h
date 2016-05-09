@@ -35,6 +35,7 @@ extern "C" {
 #endif
 
 #include <stdlib.h>
+#include <stdint.h>
 #include "poly.h"
 
 typedef enum {
