@@ -37,7 +37,7 @@ distclean:
 	-(cd linenoise && $(MAKE) clean) > /dev/null || true
 	-(cd lua && $(MAKE) clean) > /dev/null || true
 	-(cd geohash-int && $(MAKE) clean) > /dev/null || true
-	-(cd tile38geo && $(MAKE) clean) > /dev/null || true
+	-(cd spatial && $(MAKE) clean) > /dev/null || true
 	-(cd jemalloc && [ -f Makefile ] && $(MAKE) distclean) > /dev/null || true
 	-(rm -f .make-*)
 

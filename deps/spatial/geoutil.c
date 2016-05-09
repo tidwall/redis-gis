@@ -49,13 +49,13 @@
 #define DEG(rad) ((rad)*180.0/PI)
 
 double geoutilDistance(double latA, double lonA, double latB, double lonB){
-	double φ1 = RAD(latA);
-	double λ1 = RAD(lonA);
-	double φ2 = RAD(latB);
-	double λ2 = RAD(lonB);
-	double Δφ = φ2 - φ1;
-	double Δλ = λ2 - λ1;
-	double a = sin(Δφ/2)*sin(Δφ/2) + cos(φ1)*cos(φ2)*sin(Δλ/2)*sin(Δλ/2);
+	double q1 = RAD(latA);
+	double a1 = RAD(lonA);
+	double q2 = RAD(latB);
+	double a2 = RAD(lonB);
+	double aq = q2 - q1;
+	double av = a2 - a1;
+	double a = sin(aq/2)*sin(aq/2) + cos(q1)*cos(q2)*sin(av/2)*sin(av/2);
 	double c = 2 * atan2(sqrt(a), sqrt(1-a));
 	return EARTH_RADIUS * c;
 }
@@ -64,15 +64,15 @@ void geoutilDestinationLatLon(double lat, double lon, double distanceMeters, dou
 	if (!destLat || !destLon){
 		return;
 	}
-	double δ = distanceMeters / EARTH_RADIUS; // angular distance in radians
-	double θ = RAD(bearingDegrees);
-	double φ1 = RAD(lat);
-	double λ1 = RAD(lon);
-	double φ2 = asin(sin(φ1)*cos(δ) + cos(φ1)*sin(δ)*cos(θ));
-	double λ2 = λ1 + atan2(sin(θ)*sin(δ)*cos(φ1), cos(δ)-sin(φ1)*sin(φ2));
-	λ2 = fmod(λ2+3*PI, 2*PI) - PI; // normalise to -180..+180°
-	*destLat = DEG(φ2);
-	*destLon = DEG(λ2);
+	double tq = distanceMeters / EARTH_RADIUS; // angular distance in radians
+	double Z = RAD(bearingDegrees);
+	double q1 = RAD(lat);
+	double a1 = RAD(lon);
+	double q2 = asin(sin(q1)*cos(tq) + cos(q1)*sin(tq)*cos(Z));
+	double a2 = a1 + atan2(sin(Z)*sin(tq)*cos(q1), cos(tq)-sin(q1)*sin(q2));
+	a2 = fmod(a2+3*PI, 2*PI) - PI; // normalise to -180..+180°
+	*destLat = DEG(q2);
+	*destLon = DEG(a2);
 }
 
 geomRect geoutilBoundsFromLatLon(double centerLat, double centerLon, double distanceMeters){

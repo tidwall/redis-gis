@@ -1,5 +1,5 @@
 STD= 
-WARN= -Wall -Wno-strict-aliasing
+WARN= -Wall -Wno-strict-aliasing -Wno-typedef-redefinition
 OPT= -O2 -std=c99
 
 R_CFLAGS= $(STD) $(WARN) $(OPT) $(DEBUG) $(CFLAGS)
@@ -17,6 +17,7 @@ testapp: all
 		geom_test.c geom.o \
 		rtree_test.c rtree.o \
 		geoutil_test.c geoutil.o \
+		json.o \
 		polyinside_test.c polyintersects_test.c poly_test.c \
 			poly.o polyinside.o polyraycast.o polyintersects.o \
 
