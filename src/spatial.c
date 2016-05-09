@@ -463,7 +463,7 @@ void processFences(spatial *s, sds field, geom g, int fenceNotify){
                     if (!imsg) imsg = newinoutmsg("inside:", field);
                     pubsubPublishMessage(f->channel, imsg);
                 } else {
-                    if (!omsg) omsg = newinoutmsg("inside:", field);
+                    if (!omsg) omsg = newinoutmsg("outside:", field);
                     pubsubPublishMessage(f->channel, omsg);
                 }
             }
