@@ -130,4 +130,5 @@ The current Redis codebase is quite good and I'm still learning its APIs, idioms
 Josh Baker [@tidwall](http://twitter.com/tidwall)
 
 ## License
-Redis-GIS source code is available under the BSD [License](/LICENSE).
+Redis-GIS source code is available under the BSD [License](/COPYING).
+
