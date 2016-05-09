@@ -28,6 +28,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 #include <ctype.h>
+typedef struct siginfo_t siginfo_t;
 #include "server.h"
 #include "spatial.h"
 #include "rtree.h"
