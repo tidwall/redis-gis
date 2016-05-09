@@ -28,6 +28,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 #include <ctype.h>
+#include "server.h"
 #include "spatial.h"
 #include "rtree.h"
 #include "geoutil.h"

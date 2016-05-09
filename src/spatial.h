@@ -1,7 +1,6 @@
 #ifndef __SPATIAL_H__
 #define __SPATIAL_H__
 
-#include "server.h"
 
 typedef struct spatial spatial;
 //typedef struct client client;
