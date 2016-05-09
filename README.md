@@ -3,7 +3,7 @@ Redis-GIS
 
 Geospatial and realtime geofencing commands for [Redis](https://github.com/tidwall/redis) based on the [Tile38](https://github.com/tidwall/tile38) project.
 
-*Please note that this is an experimental project and is not recommended for production use.*
+*Please note that this is an experimental project and is not ready for production use.*
 
 
 ## Features
