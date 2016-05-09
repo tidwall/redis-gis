@@ -20,6 +20,7 @@ testapp: all
 		json.o \
 		polyinside_test.c polyintersects_test.c poly_test.c \
 			poly.o polyinside.o polyraycast.o polyintersects.o \
+		-lm
 
 test: testapp
 	-@./test
