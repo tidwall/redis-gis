@@ -14,8 +14,7 @@
 
 release_hdr := $(shell sh -c './mkreleasehdr.sh')
 uname_S := $(shell sh -c 'uname -s 2>/dev/null || echo not')
-#OPTIMIZATION?=-O2
-OPTIMIZATION?=-g
+OPTIMIZATION?=-O2
 DEPENDENCY_TARGETS=hiredis linenoise lua geohash-int spatial
 
 # Default settings
